@@ -30,6 +30,28 @@ By default the API listens on `http://localhost:5080` (see `FullRes.Api/Properti
 - Provider uploads are capped at **500 KB**, so larger images are transparently re-encoded (see below).
 - Review SerpApi's and Google's terms before deploying this publicly; FullRes does not grant any right to redistribute third-party images and the provider does not expose a similarity score.
 
+## Deploy (Docker)
+
+A multi-stage [`Dockerfile`](Dockerfile) builds the API on the official .NET 8 images. It publishes the API only (not the tests), runs as the non-root `app` user, installs `libfontconfig1` (required by SkiaSharp at runtime) and binds to `${PORT}` so it works on platforms like Render.
+
+```bash
+# from the repo root; the build context is the back/ directory
+docker build -t fullres-api ./back
+docker run --rm -p 8080:8080 -e FullRes__SerpApi__ApiKey=<key> fullres-api
+```
+
+On **Render** (Web Service, Docker):
+
+- Root Directory: `back`
+- Dockerfile Path: `Dockerfile`
+- Port: leave the default — Render injects `PORT` and the container binds to it.
+- Add configuration as environment variables (`FullRes__SerpApi__ApiKey`, `FullRes__Cors__AllowedOrigins__0=https://<your-pages-domain>`, …). No `.env` file is needed; `.dockerignore` keeps it out of the image.
+
+Notes for a public deployment:
+
+- Set `Cors:AllowedOrigins` to the deployed frontend origin (e.g. `https://fullres.pages.dev`), otherwise the browser will block the API calls.
+- The per-IP rate limiter uses `Connection.RemoteIpAddress`. Behind Render's proxy this is the proxy address unless forwarded headers are configured; since the proxy IPs are not fixed you cannot easily pin `ForwardedHeaders:KnownProxies`, so all clients may share one bucket. Adjust `RateLimit` accordingly or keep the app behind your own proxy if you need accurate per-client limits.
+
 ## Configuration
 
 | Key | Default | Description |
