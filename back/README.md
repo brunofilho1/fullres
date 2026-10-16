@@ -134,6 +134,20 @@ Errors use [RFC 7807 ProblemDetails](https://datatracker.ietf.org/doc/html/rfc78
 
 When the failure is a transient limit, the response also carries a `Retry-After` header (seconds).
 
+Example (`Content-Type: application/problem+json`):
+
+```json
+{
+  "type": "about:blank",
+  "title": "The search provider quota is exhausted.",
+  "status": 503,
+  "detail": "Searches are temporarily unavailable because the search service reached its usage limit. Please try again later.",
+  "instance": "/api/images/search",
+  "code": "provider_quota_exceeded",
+  "traceId": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+}
+```
+
 | HTTP | `code` | Meaning |
 | --- | --- | --- |
 | 400 | `file_missing` | No `image` field in the request. |

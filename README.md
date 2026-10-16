@@ -100,16 +100,24 @@ pnpm preview  # preview the production build
 
 The web app calls `http://localhost:5080` by default; override it with `VITE_API_BASE_URL` (see `front/web/.env.example`).
 
+### 3. Tests
+
+```bash
+dotnet test back/FullRes.Tests/FullRes.Tests.csproj   # backend (xUnit)
+cd front/web && pnpm test                             # frontend (Vitest)
+```
+
 ## Repository layout
 
 ```text
 FullRes/
 ├── front/
-│   └── web/            # React + TypeScript app (Vite, Oxlint, pnpm)
+│   └── web/            # React + TypeScript app (Vite, Vitest, Oxlint, pnpm)
 │       ├── src/
 │       ├── public/
 │       ├── package.json
-│       └── pnpm-lock.yaml
+│       ├── pnpm-lock.yaml
+│       └── .env.example
 │
 ├── back/
 │   ├── FullRes.Api/            # ASP.NET Core Web API (search pipeline)
