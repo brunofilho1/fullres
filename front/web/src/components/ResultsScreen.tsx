@@ -9,7 +9,7 @@ import {
   SlidersHorizontal,
   TriangleAlert,
 } from 'lucide-react'
-import type { ImageMeta, Match, SortKey } from '../lib/types'
+import type { ImageMeta, Match, SearchFailure, SortKey } from '../lib/types'
 import { aspectRatio, formatBytes, pixels, ratioGroup, resolutionLabel } from '../lib/format'
 import { ResultCard } from './ResultCard'
 import { CompareModal } from './CompareModal'
@@ -20,7 +20,7 @@ interface ResultsScreenProps {
   matches: Match[]
   warnings: string[]
   providerName: string | null
-  apiError: string | null
+  failure: SearchFailure | null
   onRetry: () => void
   onRestart: () => void
 }
@@ -51,7 +51,7 @@ export function ResultsScreen({
   matches,
   warnings,
   providerName,
-  apiError,
+  failure,
   onRetry,
   onRestart,
 }: ResultsScreenProps) {
@@ -100,7 +100,8 @@ export function ResultsScreen({
     setMinSimilarity(0)
   }
 
-  const state = apiError ? 'error' : matches.length === 0 ? 'empty' : 'results'
+  const hasError = failure !== null
+  const state = hasError && matches.length === 0 ? 'error' : matches.length === 0 ? 'empty' : 'results'
 
   return (
     <section className="results container">
@@ -141,7 +142,10 @@ export function ResultsScreen({
             <CircleAlert size={22} />
           </span>
           <h3>Something went wrong</h3>
-          <p>{apiError}</p>
+          <p>{failure?.message}</p>
+          {failure?.reference && (
+            <p className="banner-ref">Código de referência: {failure.reference}</p>
+          )}
           <div className="state-actions">
             <button type="button" className="btn btn-primary" onClick={onRetry}>
               <RotateCcw size={15} />
@@ -195,6 +199,25 @@ export function ResultsScreen({
           </aside>
 
           <div>
+            {hasError && (
+              <div className="banner is-error" role="alert">
+                <CircleAlert size={16} style={{ flex: 'none', marginTop: 2 }} />
+                <div>
+                  <strong>Latest search failed</strong>
+                  <p>{failure?.message}</p>
+                  {failure?.reference && (
+                    <p className="banner-ref">Código de referência: {failure.reference}</p>
+                  )}
+                  <div className="state-actions">
+                    <button type="button" className="btn btn-primary" onClick={onRetry}>
+                      <RotateCcw size={15} />
+                      Try again
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {state !== 'empty' && warnings.length > 0 && (
               <div className="banner" role="status">
                 <TriangleAlert size={16} style={{ flex: 'none', marginTop: 2 }} />

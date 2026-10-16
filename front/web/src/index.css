@@ -1097,6 +1097,27 @@ p {
   font-size: 13px;
 }
 
+.banner.is-error {
+  border-color: rgba(252, 165, 165, 0.3);
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+
+.banner.is-error strong {
+  color: var(--danger);
+}
+
+.banner-ref {
+  color: var(--muted-2);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.banner .state-actions {
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
 .state {
   padding: 56px 24px;
   text-align: center;

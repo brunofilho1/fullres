@@ -38,6 +38,13 @@ By default the API listens on `http://localhost:5080` (see `FullRes.Api/Properti
 | `FullRes:MaxImagePixels` | `30000000` | Maximum decoded pixel count (compression-bomb guard). |
 | `FullRes:ProviderMaxImageBytes` | `512000` | Target byte size when re-encoding for the provider. |
 | `FullRes:ProviderTimeoutSeconds` | `20` | Timeout for provider upload + search calls. |
+| `FullRes:MaxConcurrentSearches` | `4` | Maximum provider searches running at once on this instance. |
+| `FullRes:Resilience:MaxRetries` | `2` | Retries for transient provider failures (HTTP 5xx only), with exponential backoff + jitter. |
+| `FullRes:Resilience:RetryBaseDelayMs` | `300` | Base delay for the backoff. |
+| `FullRes:Resilience:CircuitBreakerEnabled` | `true` | Stop calling the provider after repeated transient failures. |
+| `FullRes:Resilience:CircuitBreakerFailureThreshold` | `5` | Consecutive transient failures before the breaker opens. |
+| `FullRes:Resilience:CircuitBreakerOpenSeconds` | `30` | How long the breaker stays open before probing again. |
+| `FullRes:Resilience:QuotaCooldownSeconds` | `600` | How long to avoid the provider after a quota-exhausted response. |
 | `FullRes:SerpApi:ApiKey` | *(empty)* | SerpApi key. Empty disables real searches. |
 | `FullRes:SerpApi:SearchEndpoint` | `https://serpapi.com/search` | Search endpoint (overridable for tests). |
 | `FullRes:SerpApi:UploadEndpoint` | `https://serpapi.com/image` | Upload endpoint (overridable for tests). |
@@ -50,6 +57,8 @@ By default the API listens on `http://localhost:5080` (see `FullRes.Api/Properti
 | `FullRes:Cors:AllowedOrigins` | `["http://localhost:5173"]` | Origins allowed to call the API. |
 | `FullRes:RateLimit:PermitLimit` | `20` | Requests allowed per IP per window. |
 | `FullRes:RateLimit:WindowSeconds` | `60` | Rate-limit window length. |
+| `FullRes:ForwardedHeaders:Enabled` | `false` | Trust `X-Forwarded-For`/`-Proto`. Enable **only** behind a proxy you control. |
+| `FullRes:ForwardedHeaders:KnownProxies` | `[]` | Proxy IPs allowed to set forwarded headers. Empty ⇒ loopback only. |
 
 ## Endpoints
 
@@ -118,27 +127,49 @@ Unknown values are always `null` — the API never invents dimensions, formats, 
 
 ### Error responses
 
-Errors use [RFC 7807 ProblemDetails](https://datatracker.ietf.org/doc/html/rfc7807) with an extra `code` field:
+Errors use [RFC 7807 ProblemDetails](https://datatracker.ietf.org/doc/html/rfc7807) with two extra fields:
+
+- `code` — a stable, machine-readable identifier (table below). The frontend maps these to user-facing messages.
+- `traceId` — the request's correlation id (the W3C `Activity` id, or the ASP.NET `TraceIdentifier`). Log it to correlate a report with server logs; it is never a stack trace.
+
+When the failure is a transient limit, the response also carries a `Retry-After` header (seconds).
 
 | HTTP | `code` | Meaning |
 | --- | --- | --- |
 | 400 | `file_missing` | No `image` field in the request. |
 | 400 | `file_empty` | The uploaded file is empty. |
-| 400 | `invalid_request` | Invalid query parameters. |
-| 413 | `file_too_large` | Upload exceeds `MaxUploadBytes`. |
+| 400 | `invalid_request` | Invalid query parameters or malformed request. |
+| 413 | `file_too_large` | Upload exceeds `MaxUploadBytes` (also returned when Kestrel/multipart rejects an oversized body). |
 | 415 | `format_unsupported` | Not a supported image format. |
 | 415 | `file_invalid` | Content is not a valid image. |
 | 422 | `image_dimensions_too_large` | Too many pixels to process. |
 | 422 | `image_cannot_be_prepared` | Could not shrink/re-encode below the provider limit. |
 | 422 | `provider_rejected_image` | The provider refused the image. |
-| 429 | `rate_limited` | Per-IP rate limit exceeded. |
-| 502 | `provider_credentials_invalid` | Provider rejected the API key. |
+| 429 | `rate_limited` | Per-IP rate limit exceeded (FullRes). |
 | 502 | `provider_invalid_response` | Provider returned an unexpected payload. |
-| 502 | `provider_unavailable` | Provider could not be reached. |
+| 502 | `provider_error` | Provider rejected the request as invalid (bad upload). |
 | 503 | `provider_not_configured` | No `FullRes:SerpApi:ApiKey` configured. |
-| 503 | `provider_rate_limited` | Provider quota/rate limit reached. |
+| 503 | `provider_credentials_invalid` | Provider rejected the API key. |
+| 503 | `provider_rate_limited` | Provider per-hour throughput limit reached. |
+| 503 | `provider_quota_exceeded` | Provider account is out of searches/searches limit reached. |
+| 503 | `provider_unavailable` | Provider could not be reached. |
+| 503 | `search_busy` | Too many concurrent searches on this instance; retry shortly. |
 | 504 | `provider_timeout` | Provider timed out. |
 | 500 | `unexpected_error` | Unhandled server error. |
+
+> `provider_credentials_invalid`, `provider_unavailable`, `search_busy` and the quota/rate-limit codes all map to **503** because they are transient from the client's point of view — retrying later is reasonable. Server logs keep the real cause and the raw provider detail; clients only receive safe, generic `detail` text.
+
+## Resilience and failure handling
+
+The provider is the most likely thing to fail, so its failures are classified and contained:
+
+- **Classification** — the SerpApi provider distinguishes an out-of-searches account (`provider_quota_exceeded`) from the hourly throughput limit (`provider_rate_limited`), a rejected key (`provider_credentials_invalid`), a bad upload (`provider_error`), a rejected image (`provider_rejected_image`), timeouts (`provider_timeout`) and malformed responses (`provider_invalid_response`, including a `search_metadata.status` of `Error`).
+- **Retries** — transient failures (HTTP 5xx, network errors) are retried up to `Resilience:MaxRetries` with exponential backoff and jitter. Non-transient failures (4xx, quota, rejected image) are never retried.
+- **Circuit breaker** — after `CircuitBreakerFailureThreshold` consecutive transient failures the provider is skipped for `CircuitBreakerOpenSeconds`; a quota-exhausted response parks the provider for `QuotaCooldownSeconds`. While open, searches return `503` immediately instead of hammering the provider.
+- **Concurrency gate** — at most `MaxConcurrentSearches` provider searches run at once; extra requests get `503 search_busy` with `Retry-After` instead of silently consuming quota.
+- **Client messages** — the frontend translates error `code`s into Brazilian-Portuguese messages (see the frontend README). Raw provider payloads, API keys and stack traces are never sent to the client; those stay in the server logs, keyed by the `traceId` returned to the user.
+
+The frontend has its own request watchdog (a client-side timeout) and guards against stale/duplicate searches, so a slow or failed request never leaves the UI stuck.
 
 ## How a search is processed
 
@@ -152,7 +183,8 @@ Errors use [RFC 7807 ProblemDetails](https://datatracker.ietf.org/doc/html/rfc78
 
 - **SSRF guard** (`Security/SsrfGuard.cs`) — remote fetches resolve DNS and connect directly to the validated IP (no rebinding gap), allow only `http`/`https` on ports 80/443, block loopback/private/link-local/CGNAT/metadata ranges, and re-validate every redirect.
 - **Untrusted uploads are never decoded blindly** — format detection reads headers first and a pixel cap blocks compression bombs.
-- **Rate limiting** — a per-IP fixed-window limiter protects the provider quota.
+- **Rate limiting** — a per-IP fixed-window limiter protects the provider quota. It is **in-memory**, so with multiple API instances each instance enforces its own limit; use a shared store (e.g. Redis) if you scale out.
+- **Forwarded headers** — disabled by default. When enabling behind a proxy/CDN, list the proxy IPs in `ForwardedHeaders:KnownProxies`; otherwise clients could spoof `X-Forwarded-For` and bypass the per-IP rate limit.
 - **CORS** — only the configured origins may call the API from a browser.
 
 ## Tests
@@ -161,7 +193,7 @@ Errors use [RFC 7807 ProblemDetails](https://datatracker.ietf.org/doc/html/rfc78
 dotnet test back/FullRes.Tests/FullRes.Tests.csproj
 ```
 
-The suite covers header inspection, upload preparation (including the re-encode path), result processing, the SSRF guard, the SerpApi provider (with a stubbed HTTP handler) and the search endpoint end to end via `WebApplicationFactory`.
+The suite covers header inspection, upload preparation (including the re-encode path), result processing, the SSRF guard, the SerpApi provider (with a stubbed HTTP handler — including quota vs. rate-limit, `search_metadata.status = Error`, `Retry-After` and retry behaviour), the circuit breaker, and the search endpoint end to end via `WebApplicationFactory` (error contract, `Retry-After`, `traceId`, rate limiting and the upload-size guard).
 
 ## Project layout
 
@@ -173,7 +205,8 @@ FullRes.Api/
 ├── Options/FullResOptions.cs               # strongly-typed configuration
 ├── Providers/
 │   ├── IReverseImageSearchProvider.cs      # add new providers here
-│   ├── ProviderExceptions.cs
+│   ├── ProviderExceptions.cs               # ProviderErrorKind + exceptions
+│   ├── ProviderCircuitBreaker.cs           # transient-failure / quota cooldown
 │   └── SerpApi/SerpApiGoogleLensProvider.cs
 ├── Security/SsrfGuard.cs
 ├── Services/

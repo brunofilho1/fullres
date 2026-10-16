@@ -60,15 +60,49 @@ internal sealed class FakeProvider : IReverseImageSearchProvider
     ];
 }
 
+internal sealed class ThrowingProvider : IReverseImageSearchProvider
+{
+    public const string SecretPayload = "secret-provider-payload";
+
+    private readonly SearchProviderException _exception;
+
+    public ThrowingProvider(ProviderErrorKind kind, int? retryAfterSeconds = null)
+        => _exception = new SearchProviderException(
+            kind,
+            "The search provider failed.",
+            providerDetail: SecretPayload,
+            retryAfterSeconds: retryAfterSeconds);
+
+    public string Name => "Throwing Provider";
+    public bool IsConfigured => true;
+
+    public Task<IReadOnlyList<SearchCandidate>> SearchAsync(PreparedImage image, CancellationToken cancellationToken)
+        => Task.FromException<IReadOnlyList<SearchCandidate>>(_exception);
+}
+
+internal sealed class EmptyProvider : IReverseImageSearchProvider
+{
+    public string Name => "Empty Provider";
+    public bool IsConfigured => true;
+
+    public Task<IReadOnlyList<SearchCandidate>> SearchAsync(PreparedImage image, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<SearchCandidate>>(Array.Empty<SearchCandidate>());
+}
+
 internal sealed class ApiFactory : WebApplicationFactory<Program>
 {
     private readonly IReverseImageSearchProvider? _provider;
     private readonly string _apiKey;
+    private readonly Dictionary<string, string?> _settings;
 
-    public ApiFactory(IReverseImageSearchProvider? provider = null, string? apiKey = "test-key")
+    public ApiFactory(
+        IReverseImageSearchProvider? provider = null,
+        string? apiKey = "test-key",
+        Dictionary<string, string?>? settings = null)
     {
         _provider = provider;
         _apiKey = apiKey ?? string.Empty;
+        _settings = settings ?? new Dictionary<string, string?>();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -77,6 +111,9 @@ internal sealed class ApiFactory : WebApplicationFactory<Program>
         builder.UseSetting("FullRes:Probe:Enabled", "false");
         builder.UseSetting("FullRes:RateLimit:PermitLimit", "1000");
         builder.UseSetting("FullRes:SerpApi:ApiKey", _apiKey);
+
+        foreach (var (key, value) in _settings)
+            builder.UseSetting(key, value);
 
         if (_provider is not null)
         {
@@ -138,6 +175,19 @@ public class ImagesSearchEndpointTests
     }
 
     [Fact]
+    public async Task Search_NoMatches_Returns200WithEmptyList()
+    {
+        using var factory = new ApiFactory(new EmptyProvider());
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync("/api/images/search", Form(ImageFixtures.RealJpeg(64, 64)));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Empty(json.RootElement.GetProperty("results").EnumerateArray());
+    }
+
+    [Fact]
     public async Task Search_RespectsResolutionFilter()
     {
         using var factory = new ApiFactory(new FakeProvider());
@@ -170,6 +220,7 @@ public class ImagesSearchEndpointTests
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("file_missing", json.RootElement.GetProperty("code").GetString());
+        Assert.False(string.IsNullOrEmpty(json.RootElement.GetProperty("traceId").GetString()));
     }
 
     [Fact]
@@ -201,6 +252,22 @@ public class ImagesSearchEndpointTests
     }
 
     [Fact]
+    public async Task Search_UploadExceedsLimit_Returns413FileTooLarge()
+    {
+        using var factory = new ApiFactory(new FakeProvider(), settings: new Dictionary<string, string?>
+        {
+            ["FullRes:MaxUploadBytes"] = "4096"
+        });
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync("/api/images/search", Form(ImageFixtures.RealJpeg(256, 256, noise: 100)));
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("file_too_large", json.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
     public async Task Search_WithoutApiKey_Returns503ProviderNotConfigured()
     {
         using var factory = new ApiFactory(provider: null, apiKey: "");
@@ -211,6 +278,67 @@ public class ImagesSearchEndpointTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("provider_not_configured", json.RootElement.GetProperty("code").GetString());
+    }
+
+    [Theory]
+    [InlineData(ProviderErrorKind.QuotaExceeded, HttpStatusCode.ServiceUnavailable, "provider_quota_exceeded")]
+    [InlineData(ProviderErrorKind.Unavailable, HttpStatusCode.ServiceUnavailable, "provider_unavailable")]
+    [InlineData(ProviderErrorKind.RateLimited, HttpStatusCode.ServiceUnavailable, "provider_rate_limited")]
+    [InlineData(ProviderErrorKind.Unauthorized, HttpStatusCode.ServiceUnavailable, "provider_credentials_invalid")]
+    [InlineData(ProviderErrorKind.NotConfigured, HttpStatusCode.ServiceUnavailable, "provider_not_configured")]
+    [InlineData(ProviderErrorKind.Timeout, HttpStatusCode.GatewayTimeout, "provider_timeout")]
+    [InlineData(ProviderErrorKind.InvalidResponse, HttpStatusCode.BadGateway, "provider_invalid_response")]
+    [InlineData(ProviderErrorKind.BadRequest, HttpStatusCode.BadGateway, "provider_error")]
+    [InlineData(ProviderErrorKind.RejectedImage, HttpStatusCode.UnprocessableEntity, "provider_rejected_image")]
+    public async Task Search_ProviderFailure_MapsToStableContract(
+        ProviderErrorKind kind, HttpStatusCode expectedStatus, string expectedCode)
+    {
+        using var factory = new ApiFactory(new ThrowingProvider(kind));
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync("/api/images/search", Form(ImageFixtures.RealJpeg(64, 64)));
+
+        Assert.Equal(expectedStatus, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(expectedCode, json.RootElement.GetProperty("code").GetString());
+        Assert.Equal((int)expectedStatus, json.RootElement.GetProperty("status").GetInt32());
+        Assert.False(string.IsNullOrEmpty(json.RootElement.GetProperty("traceId").GetString()));
+        // Raw provider payloads must never reach the client.
+        var serialized = json.RootElement.GetRawText();
+        Assert.DoesNotContain(ThrowingProvider.SecretPayload, serialized);
+    }
+
+    [Fact]
+    public async Task Search_ProviderRateLimit_ForwardsRetryAfter()
+    {
+        using var factory = new ApiFactory(new ThrowingProvider(ProviderErrorKind.RateLimited, retryAfterSeconds: 30));
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync("/api/images/search", Form(ImageFixtures.RealJpeg(64, 64)));
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(30, response.Headers.RetryAfter!.Delta!.Value.TotalSeconds);
+    }
+
+    [Fact]
+    public async Task Search_ExceedsRateLimit_Returns429RateLimited()
+    {
+        using var factory = new ApiFactory(new FakeProvider(), settings: new Dictionary<string, string?>
+        {
+            ["FullRes:RateLimit:PermitLimit"] = "1"
+        });
+        using var client = factory.CreateClient();
+
+        var first = await client.PostAsync("/api/images/search", Form(ImageFixtures.RealJpeg(64, 64)));
+        var second = await client.PostAsync("/api/images/search", Form(ImageFixtures.RealJpeg(64, 64)));
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, second.StatusCode);
+        using var json = JsonDocument.Parse(await second.Content.ReadAsStringAsync());
+        Assert.Equal("rate_limited", json.RootElement.GetProperty("code").GetString());
+        Assert.False(string.IsNullOrEmpty(json.RootElement.GetProperty("traceId").GetString()));
     }
 
     [Fact]

@@ -68,4 +68,11 @@ export interface ApiProblem {
   detail?: string
   status?: number
   code?: string
+  traceId?: string
+}
+
+export interface SearchFailure {
+  code: string
+  message: string
+  reference?: string
 }

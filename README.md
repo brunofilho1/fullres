@@ -34,7 +34,7 @@ States are driven by the real API response, so the product stays honest when a s
 
 - **No matches found** — with a suggestion to try a less cropped version.
 - **Partial results** — the provider warning list is shown above the results (for example, results that could not be verified or duplicates that were removed).
-- **Temporary error** — the request failed or was interrupted and can be retried, with the API's error message shown to the user.
+- **Temporary error** — instead of a raw API message, the UI shows a friendly Brazilian-Portuguese explanation matched to the error `code` (quota exhausted, provider busy, timeout, oversized image, etc.), a **Try again** action, and — for unexpected failures — a short **reference code** (`traceId`) to quote to support. A retry never discards results that were already on screen; a failed retry keeps them visible with an error banner on top.
 
 ## Design
 
@@ -63,6 +63,7 @@ Frontend (`front/web/`):
 
 - [React 19](https://react.dev) + [TypeScript](https://www.typescriptlang.org)
 - [Vite](https://vite.dev)
+- [Vitest](https://vitest.dev) for tests
 - [Oxlint](https://oxc.rs)
 - [pnpm](https://pnpm.io)
 
@@ -92,6 +93,7 @@ cd front/web   # all frontend commands run from here
 pnpm install
 pnpm dev      # start the dev server
 pnpm build    # type-check + production build
+pnpm test     # run unit tests (Vitest)
 pnpm lint     # oxlint
 pnpm preview  # preview the production build
 ```
@@ -145,8 +147,11 @@ front/web/
 │   │   └── Thumb.tsx              # image with graceful fallback
 │   └── lib/
 │       ├── types.ts               # ImageMeta, Match, SortKey and API types
-│       ├── api.ts                 # searchImages() client for the backend
-│       └── format.ts              # pixels, resolution labels, ratios, file sizes
+│       ├── api.ts                 # searchImages() client (timeout watchdog + traceId)
+│       ├── errors.ts              # maps error codes to pt-BR messages
+│       ├── searchController.ts    # search state machine (stale/duplicate guards)
+│       ├── format.ts              # pixels, resolution labels, ratios, file sizes
+│       └── *.test.ts              # Vitest unit tests
 └── public/
     └── favicon.svg
 ```

@@ -1,12 +1,9 @@
-import { useCallback, useRef, useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { Header } from './components/Header'
 import { UploadScreen } from './components/UploadScreen'
 import { SearchProgress } from './components/SearchProgress'
 import { ResultsScreen } from './components/ResultsScreen'
-import { ApiError, searchImages, toMatch } from './lib/api'
-import type { ImageMeta, Match } from './lib/types'
-
-type View = 'upload' | 'searching' | 'results'
+import { SearchController } from './lib/searchController'
 
 function Footer() {
   return (
@@ -36,69 +33,31 @@ function Footer() {
 }
 
 function App() {
-  const [view, setView] = useState<View>('upload')
-  const [image, setImage] = useState<ImageMeta | null>(null)
-  const [matches, setMatches] = useState<Match[]>([])
-  const [warnings, setWarnings] = useState<string[]>([])
-  const [providerName, setProviderName] = useState<string | null>(null)
-  const [apiError, setApiError] = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
-
-  const runSearch = useCallback(async (meta: ImageMeta) => {
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
-
-    setImage(meta)
-    setMatches([])
-    setWarnings([])
-    setProviderName(null)
-    setApiError(null)
-    setView('searching')
-
-    try {
-      const response = await searchImages(meta.file, { sortBy: 'resolution' }, controller.signal)
-      if (controller.signal.aborted) return
-      setMatches(response.results.map(toMatch))
-      setWarnings(response.provider.warnings)
-      setProviderName(response.provider.name)
-      setView('results')
-    } catch (error) {
-      if (controller.signal.aborted) return
-      setApiError(
-        error instanceof ApiError
-          ? error.message
-          : 'Something went wrong while searching. Please try again.',
-      )
-      setView('results')
-    }
-  }, [])
-
-  const restart = useCallback(() => {
-    abortRef.current?.abort()
-    abortRef.current = null
-    setView('upload')
-    setImage(null)
-  }, [])
+  const [controller] = useState(() => new SearchController())
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    controller.getSnapshot,
+    controller.getSnapshot,
+  )
 
   return (
     <div className="app">
-      <Header onHome={restart} />
+      <Header onHome={() => controller.reset()} />
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        {view === 'upload' && <UploadScreen onSubmit={(meta) => void runSearch(meta)} />}
+        {state.status === 'idle' && <UploadScreen onSubmit={(meta) => void controller.run(meta)} />}
 
-        {view === 'searching' && image && <SearchProgress image={image} />}
+        {state.status === 'searching' && <SearchProgress image={state.image} />}
 
-        {view === 'results' && image && (
+        {(state.status === 'results' || state.status === 'error') && (
           <ResultsScreen
-            image={image}
-            matches={matches}
-            warnings={warnings}
-            providerName={providerName}
-            apiError={apiError}
-            onRetry={() => void runSearch(image)}
-            onRestart={restart}
+            image={state.image}
+            matches={state.matches}
+            warnings={state.warnings}
+            providerName={state.providerName}
+            failure={state.status === 'error' ? state.failure : null}
+            onRetry={() => void controller.run(state.image)}
+            onRestart={() => controller.reset()}
           />
         )}
       </main>

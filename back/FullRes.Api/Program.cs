@@ -1,11 +1,14 @@
+using System.Net;
 using System.Threading.RateLimiting;
 using FullRes.Api.Options;
 using FullRes.Api.Providers;
 using FullRes.Api.Providers.SerpApi;
 using FullRes.Api.Security;
 using FullRes.Api.Services;
+using FullRes.Api.Controllers;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
@@ -44,12 +47,18 @@ builder.Services.AddSingleton<IOptions<FullResOptions>>(Options.Create(fullResOp
 builder.Services.AddSingleton<UploadedImagePreparationService>();
 builder.Services.AddSingleton<SearchResultProcessor>();
 builder.Services.AddSingleton<ImageProbeService>();
+builder.Services.AddSingleton<ProviderCircuitBreaker>();
+builder.Services.AddSingleton<SearchConcurrencyGate>();
 builder.Services.AddSingleton<IReverseImageSearchProvider, SerpApiGoogleLensProvider>();
 
+// Cap how much the provider client is willing to buffer: a runaway or malicious
+// response cannot exhaust memory. PostAsync/GetAsync buffer the body, so this
+// limit applies before JSON parsing.
 builder.Services.AddHttpClient("serpapi", (sp, client) =>
 {
     var options = sp.GetRequiredService<IOptions<FullResOptions>>().Value;
     client.Timeout = TimeSpan.FromSeconds(options.ProviderTimeoutSeconds);
+    client.MaxResponseContentBufferSize = 4 * 1024 * 1024;
     client.DefaultRequestHeaders.UserAgent.ParseAdd("FullRes/1.0 (reverse image search)");
 });
 
@@ -78,6 +87,7 @@ builder.Services.AddControllers().ConfigureApiBehaviorOptions(options =>
             Instance = context.HttpContext.Request.Path
         };
         problem.Extensions["code"] = "invalid_request";
+        problem.Extensions["traceId"] = System.Diagnostics.Activity.Current?.Id ?? context.HttpContext.TraceIdentifier;
         return new BadRequestObjectResult(problem)
         {
             ContentTypes = { "application/problem+json" }
@@ -116,6 +126,7 @@ builder.Services.AddRateLimiter(options =>
             Instance = context.HttpContext.Request.Path
         };
         problem.Extensions["code"] = "rate_limited";
+        problem.Extensions["traceId"] = System.Diagnostics.Activity.Current?.Id ?? context.HttpContext.TraceIdentifier;
         context.HttpContext.Response.ContentType = "application/problem+json";
         await context.HttpContext.Response.WriteAsJsonAsync(problem, cancellationToken);
     };
@@ -131,10 +142,15 @@ builder.Services.AddRateLimiter(options =>
             }));
 });
 
+// FullRes applies its own precise size check (MaxUploadBytes) and returns a friendly
+// 413 file_too_large. The transport limits are set slightly higher so that check can run;
+// anything above the hard ceiling is still rejected by Kestrel/multipart parsing and mapped
+// to the same 413 contract by the exception handler below.
+var hardUploadLimit = fullResOptions.MaxUploadBytes + (1024 * 1024);
 builder.Services.Configure<FormOptions>(options =>
-    options.MultipartBodyLengthLimit = fullResOptions.MaxUploadBytes);
+    options.MultipartBodyLengthLimit = hardUploadLimit);
 builder.WebHost.ConfigureKestrel(options =>
-    options.Limits.MaxRequestBodySize = fullResOptions.MaxUploadBytes);
+    options.Limits.MaxRequestBodySize = hardUploadLimit);
 
 builder.Services.AddProblemDetails();
 
@@ -142,6 +158,38 @@ var app = builder.Build();
 
 foreach (var issue in fullResOptions.Validate())
     app.Logger.LogWarning("Configuration: {Issue}", issue);
+
+// Trust forwarded headers only when explicitly enabled behind a reverse proxy/CDN the
+// operator controls. The proxy address must be listed in FullRes:ForwardedHeaders:KnownProxies;
+// otherwise only the ASP.NET Core defaults (loopback) are trusted. Enabling this without
+// pinning the proxy would let clients spoof X-Forwarded-For and bypass the per-IP rate limit.
+if (fullResOptions.ForwardedHeaders.Enabled)
+{
+    var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("FullRes.Api.Startup");
+    var forwarded = new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+    };
+
+    foreach (var proxy in fullResOptions.ForwardedHeaders.KnownProxies)
+    {
+        if (IPAddress.TryParse(proxy, out var address))
+        {
+            forwarded.KnownProxies.Add(address);
+            startupLogger.LogInformation("Trusting forwarded headers from proxy {Proxy}.", proxy);
+        }
+        else
+        {
+            startupLogger.LogWarning("FullRes:ForwardedHeaders:KnownProxies entry '{Proxy}' is not a valid IP and was ignored.", proxy);
+        }
+    }
+
+    if (forwarded.KnownProxies.Count == 0)
+        startupLogger.LogWarning(
+            "Forwarded headers are enabled but no FullRes:ForwardedHeaders:KnownProxies were configured; only loopback proxies are trusted.");
+
+    app.UseForwardedHeaders(forwarded);
+}
 
 app.UseExceptionHandler(new ExceptionHandlerOptions
 {
@@ -152,16 +200,61 @@ app.UseExceptionHandler(new ExceptionHandlerOptions
             .GetRequiredService<ILoggerFactory>()
             .CreateLogger("FullRes.Api.Unhandled");
 
-        if (error is not OperationCanceledException || !httpContext.RequestAborted.IsCancellationRequested)
+        var clientAborted = httpContext.RequestAborted.IsCancellationRequested;
+
+        if (error is not OperationCanceledException || !clientAborted)
             logger.LogError(error, "Unhandled exception while processing {Method} {Path}",
                 httpContext.Request.Method, httpContext.Request.Path);
 
-        if (httpContext.Response.HasStarted)
+        if (httpContext.Response.HasStarted || clientAborted)
             return;
+
+        // Oversized request bodies surface as BadHttpRequestException (Kestrel) or
+        // InvalidDataException (multipart form limit) before the endpoint validation runs.
+        if (error is BadHttpRequestException { StatusCode: StatusCodes.Status413PayloadTooLarge }
+            or InvalidDataException)
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+            httpContext.Response.ContentType = "application/problem+json";
+            await httpContext.Response.WriteAsJsonAsync(new ProblemDetails
+            {
+                Type = "about:blank",
+                Title = "The uploaded file is too large.",
+                Status = StatusCodes.Status413PayloadTooLarge,
+                Detail = "The request body exceeds the configured upload limit.",
+                Instance = httpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = "file_too_large",
+                    ["traceId"] = System.Diagnostics.Activity.Current?.Id ?? httpContext.TraceIdentifier
+                }
+            }, httpContext.RequestAborted);
+            return;
+        }
+
+        if (error is BadHttpRequestException { StatusCode: var status } && status is >= 400 and < 500)
+        {
+            httpContext.Response.StatusCode = status;
+            httpContext.Response.ContentType = "application/problem+json";
+            await httpContext.Response.WriteAsJsonAsync(new ProblemDetails
+            {
+                Type = "about:blank",
+                Title = "The request is invalid.",
+                Status = status,
+                Detail = "The request could not be processed.",
+                Instance = httpContext.Request.Path,
+                Extensions =
+                {
+                    ["code"] = "invalid_request",
+                    ["traceId"] = System.Diagnostics.Activity.Current?.Id ?? httpContext.TraceIdentifier
+                }
+            }, httpContext.RequestAborted);
+            return;
+        }
 
         httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
         httpContext.Response.ContentType = "application/problem+json";
-        var problem = new ProblemDetails
+        var internalProblem = new ProblemDetails
         {
             Type = "about:blank",
             Title = "An unexpected error occurred.",
@@ -169,8 +262,9 @@ app.UseExceptionHandler(new ExceptionHandlerOptions
             Detail = "The server failed to process the request.",
             Instance = httpContext.Request.Path
         };
-        problem.Extensions["code"] = "unexpected_error";
-        await httpContext.Response.WriteAsJsonAsync(problem, httpContext.RequestAborted);
+        internalProblem.Extensions["code"] = "unexpected_error";
+        internalProblem.Extensions["traceId"] = System.Diagnostics.Activity.Current?.Id ?? httpContext.TraceIdentifier;
+        await httpContext.Response.WriteAsJsonAsync(internalProblem, httpContext.RequestAborted);
     }
 });
 
