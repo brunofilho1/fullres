@@ -1,15 +1,17 @@
-export function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number | null | undefined): string {
   if (!bytes) return '—'
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function pixels(width: number, height: number): number {
+export function pixels(width: number | null, height: number | null): number {
+  if (width === null || height === null) return 0
   return width * height
 }
 
-export function resolutionLabel(width: number, height: number): string {
+export function resolutionLabel(width: number | null, height: number | null): string {
+  if (width === null || height === null) return 'Unknown'
   const h = Math.max(width, height)
   const w = Math.min(width, height)
   if (w >= 3800 && h >= 2100) return '4K UHD'
@@ -26,7 +28,8 @@ export function pixelGain(original: number, found: number): string {
   return 'Same pixel count'
 }
 
-export function aspectRatio(width: number, height: number): string {
+export function aspectRatio(width: number | null, height: number | null): string {
+  if (width === null || height === null) return '—'
   const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b))
   const d = gcd(width, height) || 1
   const w = Math.round(width / d)
@@ -43,7 +46,8 @@ export function aspectRatio(width: number, height: number): string {
   return `${w}:${h}`
 }
 
-export function ratioGroup(width: number, height: number): string {
+export function ratioGroup(width: number | null, height: number | null): string {
+  if (width === null || height === null) return 'other'
   const r = width / height
   if (Math.abs(r - 16 / 9) < 0.04) return '16:9'
   if (Math.abs(r - 4 / 3) < 0.04) return '4:3'

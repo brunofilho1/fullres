@@ -9,7 +9,7 @@ import {
   SlidersHorizontal,
   TriangleAlert,
 } from 'lucide-react'
-import type { ImageMeta, Match, SearchState, SortKey } from '../lib/types'
+import type { ImageMeta, Match, SortKey } from '../lib/types'
 import { aspectRatio, formatBytes, pixels, ratioGroup, resolutionLabel } from '../lib/format'
 import { ResultCard } from './ResultCard'
 import { CompareModal } from './CompareModal'
@@ -18,6 +18,10 @@ import { Thumb } from './Thumb'
 interface ResultsScreenProps {
   image: ImageMeta
   matches: Match[]
+  warnings: string[]
+  providerName: string | null
+  apiError: string | null
+  onRetry: () => void
   onRestart: () => void
 }
 
@@ -42,14 +46,23 @@ const SORT_LABELS: Record<SortKey, string> = {
   size: 'Sorted by lightest file',
 }
 
-export function ResultsScreen({ image, matches, onRestart }: ResultsScreenProps) {
-  const [state, setState] = useState<SearchState>('results')
+export function ResultsScreen({
+  image,
+  matches,
+  warnings,
+  providerName,
+  apiError,
+  onRetry,
+  onRestart,
+}: ResultsScreenProps) {
   const [sort, setSort] = useState<SortKey>('resolution')
   const [minRes, setMinRes] = useState(0)
   const [format, setFormat] = useState('any')
   const [ratio, setRatio] = useState('any')
   const [minSimilarity, setMinSimilarity] = useState(0)
   const [comparing, setComparing] = useState<Match | null>(null)
+
+  const hasSimilarity = useMemo(() => matches.some((match) => match.similarity !== null), [matches])
 
   const bestId = useMemo(() => {
     let best: Match | null = null
@@ -64,15 +77,15 @@ export function ResultsScreen({ image, matches, onRestart }: ResultsScreenProps)
   const visible = useMemo(() => {
     const filterFormat = format.toLowerCase()
     const list = matches.filter((match) => {
-      if (Math.min(match.width, match.height) < minRes) return false
-      if (filterFormat !== 'any' && match.format.toLowerCase() !== filterFormat) return false
+      if (minRes > 0 && Math.min(match.width ?? 0, match.height ?? 0) < minRes) return false
+      if (filterFormat !== 'any' && match.format?.toLowerCase() !== filterFormat) return false
       if (ratio !== 'any' && ratioGroup(match.width, match.height) !== ratio) return false
-      if (match.similarity < minSimilarity) return false
+      if (match.similarity !== null && match.similarity < minSimilarity) return false
       return true
     })
     return list.sort((a, b) => {
-      if (sort === 'similarity') return b.similarity - a.similarity
-      if (sort === 'size') return a.bytes - b.bytes
+      if (sort === 'similarity') return (b.similarity ?? -1) - (a.similarity ?? -1)
+      if (sort === 'size') return (a.bytes ?? Number.MAX_SAFE_INTEGER) - (b.bytes ?? Number.MAX_SAFE_INTEGER)
       return pixels(b.width, b.height) - pixels(a.width, a.height)
     })
   }, [matches, format, minRes, ratio, minSimilarity, sort])
@@ -86,6 +99,8 @@ export function ResultsScreen({ image, matches, onRestart }: ResultsScreenProps)
     setRatio('any')
     setMinSimilarity(0)
   }
+
+  const state = apiError ? 'error' : matches.length === 0 ? 'empty' : 'results'
 
   return (
     <section className="results container">
@@ -105,19 +120,6 @@ export function ResultsScreen({ image, matches, onRestart }: ResultsScreenProps)
           </p>
         </div>
         <div className="results-toolbar">
-          <span className="demo">
-            Demo state
-            <select
-              value={state}
-              onChange={(e) => setState(e.target.value as SearchState)}
-              aria-label="Demo state"
-            >
-              <option value="results">Results</option>
-              <option value="partial">Partial results</option>
-              <option value="empty">No matches</option>
-              <option value="error">Temporary error</option>
-            </select>
-          </span>
           <label className="filter">
             <ArrowUpDown size={14} />
             <select
@@ -126,7 +128,7 @@ export function ResultsScreen({ image, matches, onRestart }: ResultsScreenProps)
               aria-label="Sort results"
             >
               <option value="resolution">Highest resolution</option>
-              <option value="similarity">Highest similarity</option>
+              {hasSimilarity && <option value="similarity">Highest similarity</option>}
               <option value="size">Lightest file</option>
             </select>
           </label>
@@ -139,12 +141,9 @@ export function ResultsScreen({ image, matches, onRestart }: ResultsScreenProps)
             <CircleAlert size={22} />
           </span>
           <h3>Something went wrong</h3>
-          <p>
-            One of the search providers returned an unexpected response and the request was
-            interrupted. Your image was not uploaded anywhere.
-          </p>
+          <p>{apiError}</p>
           <div className="state-actions">
-            <button type="button" className="btn btn-primary" onClick={() => setState('results')}>
+            <button type="button" className="btn btn-primary" onClick={onRetry}>
               <RotateCcw size={15} />
               Try again
             </button>
@@ -196,15 +195,14 @@ export function ResultsScreen({ image, matches, onRestart }: ResultsScreenProps)
           </aside>
 
           <div>
-            {state === 'partial' && (
+            {state !== 'empty' && warnings.length > 0 && (
               <div className="banner" role="status">
                 <TriangleAlert size={16} style={{ flex: 'none', marginTop: 2 }} />
                 <div>
                   <strong>Partial results</strong>
-                  <p>
-                    Two sources could not be queried (rate limit). Results below only cover the
-                    providers that answered — higher resolutions may still exist elsewhere.
-                  </p>
+                  {warnings.map((warning) => (
+                    <p key={warning}>{warning}</p>
+                  ))}
                 </div>
               </div>
             )}
@@ -248,19 +246,21 @@ export function ResultsScreen({ image, matches, onRestart }: ResultsScreenProps)
                   ))}
                 </select>
               </label>
-              <label className="filter filter-slider">
-                Visual match
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={5}
-                  value={minSimilarity}
-                  onChange={(e) => setMinSimilarity(Number(e.target.value))}
-                  aria-label="Minimum visual match"
-                />
-                <span className="filter-value">{minSimilarity}%</span>
-              </label>
+              {hasSimilarity && (
+                <label className="filter filter-slider">
+                  Visual match
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={5}
+                    value={minSimilarity}
+                    onChange={(e) => setMinSimilarity(Number(e.target.value))}
+                    aria-label="Minimum visual match"
+                  />
+                  <span className="filter-value">{minSimilarity}%</span>
+                </label>
+              )}
               <span className="results-count">
                 {visible.length} of {matches.length}
               </span>
@@ -274,15 +274,12 @@ export function ResultsScreen({ image, matches, onRestart }: ResultsScreenProps)
                 <h3>No matches found</h3>
                 <p>
                   We could not find another copy of this image. It may be very recent, cropped or
-                  never published. Try a less cropped version or search by the image URL.
+                  never published. Try a less cropped version.
                 </p>
                 <div className="state-actions">
                   <button type="button" className="btn btn-primary" onClick={onRestart}>
                     <ScanSearch size={15} />
                     Try another image
-                  </button>
-                  <button type="button" className="btn btn-ghost" onClick={() => setState('results')}>
-                    Back to demo results
                   </button>
                 </div>
               </div>
@@ -323,9 +320,13 @@ export function ResultsScreen({ image, matches, onRestart }: ResultsScreenProps)
                 before downloading.
               </p>
             )}
-            <p className="disclaimer">
-              Illustrative results — example images and resolutions, not actual search findings.
-            </p>
+            {state !== 'empty' && matches.length > 0 && (
+              <p className="disclaimer">
+                {providerName ? `Results provided by ${providerName}. ` : ''}
+                Dimensions marked as verified were read directly from the source image; others come
+                from the search index and may differ.
+              </p>
+            )}
           </div>
         </div>
       )}

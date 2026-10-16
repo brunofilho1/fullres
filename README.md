@@ -4,9 +4,7 @@
 
 FullRes is an open-source image search tool: upload an image and compare larger versions, original sources and better quality found across the web. The focus is on the image you sent and the results that were found — fast, simple and transparent, with no account required.
 
-> This repository contains the **front-end interface prototype**. The upload flow, the search progress and the results/comparison screens are implemented; the search results are illustrative mock data and no reverse image search provider is wired up yet. Results are intentionally marked as illustrative in the UI.
->
-> The repository is organized as a monorepo: the web app lives in [`front/web/`](front/web) and a future ASP.NET Core backend will live in `back/` (currently empty, reserved).
+> The repository is organized as a monorepo: the web app lives in [`front/web/`](front/web) and the ASP.NET Core API that talks to the reverse image search provider lives in [`back/`](back). To run a real search you need a [SerpApi](https://serpapi.com) API key — see [`back/README.md`](back/README.md).
 
 ## Screens
 
@@ -18,27 +16,25 @@ FullRes is an open-source image search tool: upload an image and compare larger 
 
 ### 2. Search progress
 
-- Explicit per-step progress — extract fingerprint, query sources, fetch candidate pages, measure each candidate, rank matches.
+- Two honest steps — read the image locally (dimensions, format, size) and search the provider indexes — plus an elapsed-time counter.
 - No artificial progress bar that fills for no reason; each step represents real work.
 
 ### 3. Results
 
 - **Your original** panel with dimensions, pixel count, quality label, format, ratio and file size.
-- **Filters** — minimum resolution, aspect ratio, format and minimum visual match.
+- **Filters** — minimum resolution, aspect ratio, format and minimum visual match (applied in the browser, so they stay instant).
 - **Sorting** — highest resolution, highest similarity or lightest file.
-- **Match cards** — resolution, quality label, format, file size, source domain, similarity meter and how many times more pixels the found version has.
+- **Match cards** — resolution, quality label, format, file size, source domain and how many times more pixels the found version has. Each result is marked as **verified** (dimensions read directly from the source image) or **reported** (dimensions come from the search index only).
 - Highlighted best match, without hiding the alternatives: the largest image is not always the original or the best quality.
 - **Comparison modal** — side by side on desktop, toggle between original and found on mobile, with zoom, resolution delta and direct links to open or download the source.
 
 ### 4. Result states
 
-Three deliberately designed states, so the product feels mature even when a search does not go perfectly:
+States are driven by the real API response, so the product stays honest when a search does not go perfectly:
 
 - **No matches found** — with a suggestion to try a less cropped version.
-- **Partial results** — one or more providers failed (rate limit), so the list is incomplete and says so.
-- **Temporary error** — the request was interrupted and can be retried.
-
-You can preview all of them from the **Demo state** selector in the results header.
+- **Partial results** — the provider warning list is shown above the results (for example, results that could not be verified or duplicates that were removed).
+- **Temporary error** — the request failed or was interrupted and can be retried, with the API's error message shown to the user.
 
 ## Design
 
@@ -70,9 +66,26 @@ Frontend (`front/web/`):
 - [Oxlint](https://oxc.rs)
 - [pnpm](https://pnpm.io)
 
-Backend (`back/`): reserved for an ASP.NET Core service — not implemented yet.
+Backend (`back/`):
+
+- [.NET 8 (ASP.NET Core)](https://dotnet.microsoft.com) Web API
+- [SkiaSharp](https://github.com/mono/SkiaSharp) for image re-encoding
+- [xUnit](https://xunit.net) for tests
+- Reverse image search via [SerpApi](https://serpapi.com) (Google Lens)
 
 ## Running it
+
+### 1. Backend
+
+```bash
+cd back
+cp .env.example .env          # then set FullRes__SerpApi__ApiKey=<your key>
+dotnet run --project FullRes.Api
+```
+
+The API starts on `http://localhost:5080` (see `back/FullRes.Api/Properties/launchSettings.json`). It boots without an API key, but searches return `503 provider_not_configured` until one is set. Full setup, endpoints and error codes are documented in [`back/README.md`](back/README.md).
+
+### 2. Frontend
 
 ```bash
 cd front/web   # all frontend commands run from here
@@ -82,6 +95,8 @@ pnpm build    # type-check + production build
 pnpm lint     # oxlint
 pnpm preview  # preview the production build
 ```
+
+The web app calls `http://localhost:5080` by default; override it with `VITE_API_BASE_URL` (see `front/web/.env.example`).
 
 ## Repository layout
 
@@ -94,8 +109,16 @@ FullRes/
 │       ├── package.json
 │       └── pnpm-lock.yaml
 │
-├── back/               # reserved for the ASP.NET Core backend (empty)
-│   └── .gitkeep
+├── back/
+│   ├── FullRes.Api/            # ASP.NET Core Web API (search pipeline)
+│   │   ├── Controllers/
+│   │   ├── Services/
+│   │   ├── Providers/
+│   │   ├── Security/
+│   │   └── Program.cs
+│   ├── FullRes.Tests/          # xUnit test suite
+│   ├── .env.example
+│   └── README.md               # API setup, endpoints and error codes
 │
 ├── .gitignore
 └── README.md
@@ -115,24 +138,26 @@ front/web/
 │   ├── components/
 │   │   ├── Header.tsx             # brand, open-source badge, GitHub link
 │   │   ├── UploadScreen.tsx       # hero, dropzone, URL input, preview
-│   │   ├── SearchProgress.tsx     # per-step search progress
+│   │   ├── SearchProgress.tsx     # two-step search progress with elapsed time
 │   │   ├── ResultsScreen.tsx      # results layout, filters, sorting, states
-│   │   ├── ResultCard.tsx         # a single match with actions
+│   │   ├── ResultCard.tsx         # a single match with verified/reported badge
 │   │   ├── CompareModal.tsx       # side-by-side comparison with zoom
 │   │   └── Thumb.tsx              # image with graceful fallback
 │   └── lib/
-│       ├── types.ts               # ImageMeta, Match, SearchState, SortKey
-│       ├── format.ts              # pixels, resolution labels, ratios, file sizes
-│       └── mock.ts                # illustrative matches
+│       ├── types.ts               # ImageMeta, Match, SortKey and API types
+│       ├── api.ts                 # searchImages() client for the backend
+│       └── format.ts              # pixels, resolution labels, ratios, file sizes
 └── public/
     └── favicon.svg
 ```
 
 ## The important detail
 
-The interface is relatively simple; the real challenge is finding the images. There is no universal mechanism that guarantees the highest resolution available on the internet, so FullRes is designed to combine reverse image search sources and image search engines within their API limits, then measure each result's resolution, remove duplicates and rank them by similarity.
+The interface is relatively simple; the real challenge is finding the images. There is no universal mechanism that guarantees the highest resolution available on the internet, so FullRes combines reverse image search indexes within their API limits, then verifies, de-duplicates and ranks the results.
 
-**New search providers are welcome.** Contributing one means returning a list of candidate images for a query; measuring, deduplicating and ranking are handled by the app.
+Two rules keep the results trustworthy: **never invent data** (unknown dimensions, formats, sizes and similarity scores are returned as `null` and shown as `—` or omitted) and **say what was checked** (each result is marked as verified or reported, and every failed check becomes a visible warning). The largest image is never claimed to be the original — it is only the largest match that was found.
+
+**New search providers are welcome.** Contributing one means implementing `IReverseImageSearchProvider` in [`back/FullRes.Api/Providers`](back/FullRes.Api/Providers) and returning a list of candidate images; verifying, de-duplicating and ranking are handled by the pipeline.
 
 ## Author
 

@@ -1,0 +1,23 @@
+@FullRes.Api_HostAddress = http://localhost:5080
+
+### Health check
+GET {{FullRes.Api_HostAddress}}/api/health
+Accept: application/json
+
+### Reverse image search (multipart/form-data)
+# Replace ./sample.jpg with a real JPG/PNG/WEBP file (max 20 MB).
+POST {{FullRes.Api_HostAddress}}/api/images/search
+Content-Type: multipart/form-data; boundary=----FullResBoundary
+
+------FullResBoundary
+Content-Disposition: form-data; name="image"; filename="sample.jpg"
+Content-Type: image/jpeg
+
+< ./sample.jpg
+------FullResBoundary
+Content-Disposition: form-data; name="sortBy"
+
+resolution
+------FullResBoundary--
+
+###

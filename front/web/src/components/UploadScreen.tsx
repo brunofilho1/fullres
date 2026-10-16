@@ -19,12 +19,35 @@ function extOf(nameOrUrl: string): string {
   return ext.toUpperCase().slice(0, 5) || 'IMG'
 }
 
-function loadMeta(src: string, name: string, format: string, bytes: number) {
+function extensionFor(mime: string): string {
+  if (mime === 'image/png') return 'png'
+  if (mime === 'image/webp') return 'webp'
+  return 'jpg'
+}
+
+function isAllowedType(type: string, name: string): boolean {
+  if (ALLOWED.includes(type)) return true
+  return type === '' && /\.(jpe?g|png|webp)$/i.test(name)
+}
+
+function loadMeta(file: File): Promise<ImageMeta> {
   return new Promise<ImageMeta>((resolve, reject) => {
+    const src = URL.createObjectURL(file)
     const img = new Image()
     img.onload = () =>
-      resolve({ src, name, width: img.naturalWidth, height: img.naturalHeight, format, bytes })
-    img.onerror = () => reject(new Error('Could not read that image.'))
+      resolve({
+        src,
+        file,
+        name: file.name,
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+        format: extOf(file.name),
+        bytes: file.size,
+      })
+    img.onerror = () => {
+      URL.revokeObjectURL(src)
+      reject(new Error('Could not read that image.'))
+    }
     img.src = src
   })
 }
@@ -42,7 +65,7 @@ export function UploadScreen({ onSubmit }: UploadScreenProps) {
 
   const acceptFile = useCallback(async (file: File) => {
     setError(null)
-    if (!ALLOWED.includes(file.type)) {
+    if (!isAllowedType(file.type, file.name)) {
       setError('Unsupported format. Use a JPG, PNG or WEBP file.')
       return
     }
@@ -51,12 +74,7 @@ export function UploadScreen({ onSubmit }: UploadScreenProps) {
       return
     }
     try {
-      const meta = await loadMeta(
-        URL.createObjectURL(file),
-        file.name,
-        extOf(file.type.split('/')[1] ?? 'img'),
-        file.size,
-      )
+      const meta = await loadMeta(file)
       setStaged(meta)
     } catch {
       setError('Could not read that image. It may be corrupted.')
@@ -79,18 +97,44 @@ export function UploadScreen({ onSubmit }: UploadScreenProps) {
     const value = url.trim()
     if (!value) return
     setError(null)
+
+    let parsed: URL
     try {
-      new URL(value)
+      parsed = new URL(value)
     } catch {
       setError('That does not look like a valid image URL.')
       return
     }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      setError('Only http and https image URLs are supported.')
+      return
+    }
+
     try {
-      const meta = await loadMeta(value, value.split('/').pop() ?? 'remote-image', extOf(value), 0)
+      const response = await fetch(parsed.toString(), { mode: 'cors' })
+      if (!response.ok) {
+        setError(`The host returned HTTP ${response.status} for that image URL.`)
+        return
+      }
+      const blob = await response.blob()
+      if (blob.size > MAX_BYTES) {
+        setError('That image is larger than 20 MB. Try a smaller copy.')
+        return
+      }
+      const name = decodeURIComponent(parsed.pathname.split('/').pop() || 'remote-image')
+      const type = blob.type && ALLOWED.includes(blob.type) ? blob.type : ''
+      if (!isAllowedType(type, name)) {
+        setError('That URL does not point to a JPG, PNG or WEBP image.')
+        return
+      }
+      const file = new File([blob], name, { type: type || `image/${extensionFor(type)}` })
+      const meta = await loadMeta(file)
       setStaged(meta)
       setUrl('')
     } catch {
-      setError('The image could not be loaded from that URL. The host may block hotlinking.')
+      setError(
+        'The browser could not download that image. The host may block direct access — download the file and upload it instead.',
+      )
     }
   }
 
@@ -234,7 +278,7 @@ export function UploadScreen({ onSubmit }: UploadScreenProps) {
         <p className="trust-note">No account required · Simple and transparent</p>
       </section>
 
-      <section className="how container">
+      <section className="how container" id="how">
         <div className="how-head">
           <span className="eyebrow">How it works</span>
         </div>
@@ -251,9 +295,9 @@ export function UploadScreen({ onSubmit }: UploadScreenProps) {
             </div>
           ))}
         </div>
-        <p className="disclaimer">
-          Conceptual mockup of the visual direction — not a functional application. Results shown are
-          illustrative.
+        <p className="disclaimer" id="providers">
+          Searches run through public reverse-image search indexes. Only the image you submit is
+          sent to the search provider.
         </p>
       </section>
     </>

@@ -24,6 +24,8 @@ export function CompareModal({ original, match, onClose }: CompareModalProps) {
 
   const originalPx = pixels(original.width, original.height)
   const matchPx = pixels(match.width, match.height)
+  const hasDimensions = match.width !== null && match.height !== null
+  const sourceUrl = match.pageUrl ?? match.url
 
   return (
     <div
@@ -42,7 +44,7 @@ export function CompareModal({ original, match, onClose }: CompareModalProps) {
           <div>
             <div className="modal-title">Comparing versions</div>
             <div className="muted" style={{ fontSize: 12.5 }}>
-              {match.domain}
+              {match.domain ?? 'unknown source'}
             </div>
           </div>
           <div className="modal-tools">
@@ -101,34 +103,42 @@ export function CompareModal({ original, match, onClose }: CompareModalProps) {
             <span className="eyebrow">
               <span>Found version</span>
               <span className="mono">
-                {match.width} × {match.height}
+                {hasDimensions ? `${match.width} × ${match.height}` : 'Unknown dimensions'}
               </span>
             </span>
             <div className={`compare-frame${zoom ? ' is-zoom' : ''}`}>
               <Thumb src={match.thumb} alt={match.title} />
             </div>
             <div className="compare-meta">
-              <span>{match.format}</span>
+              <span>{match.format ?? '—'}</span>
               <span>{formatBytes(match.bytes)}</span>
               <span>{aspectRatio(match.width, match.height)}</span>
               <span>{resolutionLabel(match.width, match.height)}</span>
-              <span>{matchPx.toLocaleString('en-US')} px</span>
+              <span>{hasDimensions ? `${matchPx.toLocaleString('en-US')} px` : '— px'}</span>
             </div>
           </div>
         </div>
 
         <div className="modal-foot">
           <div className="delta">
-            {matchPx > originalPx ? 'Resolution gain' : 'Resolution change'}
-            <strong>{pixelGain(originalPx, matchPx)}</strong>
-            <span className="muted">· {match.similarity}% visual match</span>
+            {!hasDimensions ? (
+              <span className="muted">Source dimensions unavailable for this match</span>
+            ) : (
+              <>
+                {matchPx > originalPx ? 'Resolution gain' : 'Resolution change'}
+                <strong>{pixelGain(originalPx, matchPx)}</strong>
+                {match.similarity !== null && (
+                  <span className="muted">· {match.similarity}% visual match</span>
+                )}
+              </>
+            )}
           </div>
           <div className="modal-tools">
             <a className="btn btn-ghost" href={match.url} download>
               <Download size={15} />
               Download
             </a>
-            <a className="btn btn-primary" href={match.url} target="_blank" rel="noreferrer">
+            <a className="btn btn-primary" href={sourceUrl} target="_blank" rel="noreferrer">
               <ExternalLink size={15} />
               Open source page
             </a>

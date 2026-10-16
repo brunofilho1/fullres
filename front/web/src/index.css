@@ -1143,29 +1143,6 @@ p {
   border-color: rgba(252, 165, 165, 0.3);
 }
 
-/* demo switcher */
-
-.demo {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  color: var(--muted);
-  padding: 4px 8px 4px 10px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 999px;
-}
-
-.demo select {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 12px;
-  color: var(--muted-2);
-  cursor: pointer;
-}
-
 /* ---------- compare modal ---------- */
 
 .modal-backdrop {

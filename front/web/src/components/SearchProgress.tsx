@@ -3,30 +3,21 @@ import { Check, LoaderCircle } from 'lucide-react'
 import type { ImageMeta } from '../lib/types'
 
 const STEPS = [
-  { label: 'Reading your image', desc: 'Extracting dimensions, format and a visual fingerprint.' },
-  { label: 'Querying search sources', desc: 'Asking reverse image engines in parallel.' },
-  { label: 'Fetching candidate pages', desc: 'Loading the pages that host matching files.' },
-  { label: 'Measuring each candidate', desc: 'Reading real dimensions and file sizes.' },
-  { label: 'Ranking matches', desc: 'Removing duplicates and sorting by resolution.' },
+  { label: 'Reading your image', desc: 'Dimensions, format and file size were read in your browser.' },
+  { label: 'Searching image indexes', desc: 'Uploading your image and ranking the matches returned by the provider.' },
 ]
 
 interface SearchProgressProps {
   image: ImageMeta
-  onDone: () => void
 }
 
-export function SearchProgress({ image, onDone }: SearchProgressProps) {
-  const [current, setCurrent] = useState(0)
+export function SearchProgress({ image }: SearchProgressProps) {
+  const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {
-    if (current >= STEPS.length) {
-      const done = window.setTimeout(onDone, 420)
-      return () => window.clearTimeout(done)
-    }
-    const delay = 620 + Math.round(Math.random() * 260)
-    const timer = window.setTimeout(() => setCurrent((c) => c + 1), delay)
-    return () => window.clearTimeout(timer)
-  }, [current, onDone])
+    const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   return (
     <div className="progress-page">
@@ -42,8 +33,8 @@ export function SearchProgress({ image, onDone }: SearchProgressProps) {
         </div>
         <ol className="steps">
           {STEPS.map((step, index) => {
-            const done = index < current
-            const active = index === current
+            const done = index === 0
+            const active = index === STEPS.length - 1
             return (
               <li
                 key={step.label}
@@ -52,10 +43,8 @@ export function SearchProgress({ image, onDone }: SearchProgressProps) {
                 <span className="step-dot" aria-hidden="true">
                   {done ? (
                     <Check size={12} strokeWidth={3} />
-                  ) : active ? (
-                    <LoaderCircle size={12} className="spin" />
                   ) : (
-                    <span style={{ fontSize: 10 }}>{index + 1}</span>
+                    <LoaderCircle size={12} className="spin" />
                   )}
                 </span>
                 <span>
@@ -69,10 +58,8 @@ export function SearchProgress({ image, onDone }: SearchProgressProps) {
           })}
         </ol>
         <div className="progress-foot">
-          <span>No artificial delay — each step is real work.</span>
-          <span className="mono">
-            {Math.min(current, STEPS.length)}/{STEPS.length}
-          </span>
+          <span>Waiting for the search API response…</span>
+          <span className="mono">{elapsed}s</span>
         </div>
       </div>
     </div>
