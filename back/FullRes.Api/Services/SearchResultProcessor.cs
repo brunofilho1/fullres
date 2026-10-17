@@ -12,7 +12,7 @@ public sealed record SearchFilters(
 
 public sealed record ProcessedResults(
     IReadOnlyList<ImageSearchResult> Results,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<SearchWarning> Warnings);
 
 public sealed class SearchResultProcessor
 {
@@ -24,12 +24,12 @@ public sealed class SearchResultProcessor
         SearchFilters filters,
         int preRemovedDuplicates = 0)
     {
-        var warnings = new List<string>();
+        var warnings = new List<SearchWarning>();
 
         var (deduped, duplicateCount) = DeduplicateCore(candidates);
         duplicateCount += preRemovedDuplicates;
         if (duplicateCount > 0)
-            warnings.Add($"{duplicateCount} duplicate result{(duplicateCount == 1 ? "" : "s")} removed.");
+            warnings.Add(new SearchWarning { Code = "duplicates_removed", Count = duplicateCount });
 
         var filtered = new List<SearchCandidate>();
         var hiddenByDimensions = 0;
@@ -64,11 +64,9 @@ public sealed class SearchResultProcessor
         }
 
         if (hiddenByDimensions > 0)
-            warnings.Add(
-                $"{hiddenByDimensions} result{(hiddenByDimensions == 1 ? "" : "s")} hidden by the resolution filter (dimensions unknown or too small).");
+            warnings.Add(new SearchWarning { Code = "hidden_by_resolution_filter", Count = hiddenByDimensions });
         if (hiddenByFormat > 0)
-            warnings.Add(
-                $"{hiddenByFormat} result{(hiddenByFormat == 1 ? "" : "s")} hidden by the format filter (format could not be verified).");
+            warnings.Add(new SearchWarning { Code = "hidden_by_format_filter", Count = hiddenByFormat });
 
         var similarityAvailable = filtered.Any(c => c.SimilarityScore is not null);
         var minSimilarity = filters.MinSimilarity;
@@ -83,7 +81,7 @@ public sealed class SearchResultProcessor
             else
             {
                 minSimilarity = null;
-                warnings.Add("Similarity filter ignored: the search provider does not provide similarity scores.");
+                warnings.Add(new SearchWarning { Code = "similarity_filter_ignored" });
             }
         }
 
@@ -91,7 +89,7 @@ public sealed class SearchResultProcessor
         if (sortBy == "similarity" && !similarityAvailable)
         {
             sortBy = "resolution";
-            warnings.Add("Sorted by resolution instead: the search provider does not provide similarity scores.");
+            warnings.Add(new SearchWarning { Code = "similarity_sort_fallback" });
         }
 
         var ordered = ApplySort(filtered, sortBy);

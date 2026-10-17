@@ -43,7 +43,7 @@ public class SearchResultProcessorTests
         var result = _processor.Process(candidates, new SearchFilters());
 
         Assert.Equal(3, result.Results.Count);
-        Assert.Contains("1 duplicate result removed.", result.Warnings);
+        Assert.Contains(result.Warnings, w => w.Code == "duplicates_removed" && w.Count == 1);
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public class SearchResultProcessorTests
 
         Assert.Single(result.Results);
         Assert.Equal("https://a/big.jpg", result.Results[0].ImageUrl);
-        Assert.Contains(result.Warnings, w => w.Contains("2 results hidden by the resolution filter"));
+        Assert.Contains(result.Warnings, w => w.Code == "hidden_by_resolution_filter" && w.Count == 2);
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public class SearchResultProcessorTests
 
         Assert.Single(result.Results);
         Assert.Equal("https://a/two.jpg", result.Results[0].ImageUrl);
-        Assert.Contains(result.Warnings, w => w.Contains("2 results hidden by the format filter"));
+        Assert.Contains(result.Warnings, w => w.Code == "hidden_by_format_filter" && w.Count == 2);
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public class SearchResultProcessorTests
         var result = _processor.Process(candidates, new SearchFilters(SortBy: "similarity"));
 
         Assert.Equal("https://a/2.jpg", result.Results[0].ImageUrl);
-        Assert.Contains(result.Warnings, w => w.Contains("does not provide similarity scores"));
+        Assert.Contains(result.Warnings, w => w.Code == "similarity_sort_fallback");
     }
 
     [Fact]

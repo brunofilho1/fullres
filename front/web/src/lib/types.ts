@@ -10,7 +10,8 @@ export interface ImageMeta {
 
 export interface Match {
   id: string
-  title: string
+  /** Raw title from the search index; null when the index provided none. */
+  title: string | null
   url: string
   pageUrl: string | null
   thumb: string
@@ -51,10 +52,19 @@ export interface ApiResult {
   provider: string
 }
 
+/**
+ * Structured warning emitted by the provider pipeline. `code` is a stable identifier that the
+ * UI localises; `count` is only present when the warning is about a number of results.
+ */
+export interface SearchWarning {
+  code: string
+  count?: number | null
+}
+
 export interface ApiProviderInfo {
   name: string
   configured: boolean
-  warnings: string[]
+  warnings: SearchWarning[]
 }
 
 export interface SearchResponse {
@@ -71,8 +81,11 @@ export interface ApiProblem {
   traceId?: string
 }
 
+/**
+ * Localisation-free description of a failed search. The human-readable text is derived from
+ * `code` at render time so it follows the selected language.
+ */
 export interface SearchFailure {
   code: string
-  message: string
   reference?: string
 }

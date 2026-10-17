@@ -9,8 +9,16 @@ import {
   SlidersHorizontal,
   TriangleAlert,
 } from 'lucide-react'
-import type { ImageMeta, Match, SearchFailure, SortKey } from '../lib/types'
-import { aspectRatio, formatBytes, pixels, ratioGroup, resolutionLabel } from '../lib/format'
+import type {
+  ImageMeta,
+  Match,
+  SearchFailure,
+  SearchWarning,
+  SortKey,
+} from '../lib/types'
+import { aspectRatio, formatBytes, pixels, ratioGroup } from '../lib/format'
+import { useI18n } from '../lib/i18n'
+import type { MessageKey } from '../lib/i18n/messages/en'
 import { ResultCard } from './ResultCard'
 import { CompareModal } from './CompareModal'
 import { Thumb } from './Thumb'
@@ -18,32 +26,49 @@ import { Thumb } from './Thumb'
 interface ResultsScreenProps {
   image: ImageMeta
   matches: Match[]
-  warnings: string[]
+  warnings: SearchWarning[]
   providerName: string | null
   failure: SearchFailure | null
   onRetry: () => void
   onRestart: () => void
 }
 
-const MIN_RES_OPTIONS = [
-  { value: 0, label: 'Any resolution' },
-  { value: 1920, label: '1920px +' },
-  { value: 2560, label: '2560px +' },
-  { value: 3840, label: '3840px (4K) +' },
+interface Option {
+  value: string | number
+  message?: MessageKey
+  literal?: string
+}
+
+const MIN_RES_OPTIONS: Option[] = [
+  { value: 0, message: 'filters.anyResolution' },
+  { value: 1920, literal: '1920px +' },
+  { value: 2560, literal: '2560px +' },
+  { value: 3840, literal: '3840px (4K) +' },
 ]
 
-const RATIO_OPTIONS = [
-  { value: 'any', label: 'Any ratio' },
-  { value: '16:9', label: '16:9' },
-  { value: '3:2', label: '3:2' },
-  { value: '4:3', label: '4:3' },
-  { value: '1:1', label: '1:1' },
+const RATIO_OPTIONS: Option[] = [
+  { value: 'any', message: 'filters.anyRatio' },
+  { value: '16:9', literal: '16:9' },
+  { value: '3:2', literal: '3:2' },
+  { value: '4:3', literal: '4:3' },
+  { value: '1:1', literal: '1:1' },
 ]
 
-const SORT_LABELS: Record<SortKey, string> = {
-  resolution: 'Sorted by resolution',
-  similarity: 'Sorted by similarity',
-  size: 'Sorted by lightest file',
+const FORMAT_OPTIONS: Option[] = [
+  { value: 'any', message: 'filters.anyFormat' },
+  { value: 'JPG', literal: 'JPG' },
+  { value: 'PNG', literal: 'PNG' },
+  { value: 'WEBP', literal: 'WEBP' },
+]
+
+const SORT_LABELS: Record<SortKey, MessageKey> = {
+  resolution: 'results.sortedByResolution',
+  similarity: 'results.sortedBySimilarity',
+  size: 'results.sortedBySize',
+}
+
+function optionLabel(option: Option, t: ReturnType<typeof useI18n>['t']): string {
+  return option.message ? t(option.message) : (option.literal ?? '')
 }
 
 export function ResultsScreen({
@@ -55,6 +80,7 @@ export function ResultsScreen({
   onRetry,
   onRestart,
 }: ResultsScreenProps) {
+  const { t, tc, formatNumber, resolutionLabel, warningMessage, errorMessage } = useI18n()
   const [sort, setSort] = useState<SortKey>('resolution')
   const [minRes, setMinRes] = useState(0)
   const [format, setFormat] = useState('any')
@@ -85,13 +111,13 @@ export function ResultsScreen({
     })
     return list.sort((a, b) => {
       if (sort === 'similarity') return (b.similarity ?? -1) - (a.similarity ?? -1)
-      if (sort === 'size') return (a.bytes ?? Number.MAX_SAFE_INTEGER) - (b.bytes ?? Number.MAX_SAFE_INTEGER)
+      if (sort === 'size')
+        return (a.bytes ?? Number.MAX_SAFE_INTEGER) - (b.bytes ?? Number.MAX_SAFE_INTEGER)
       return pixels(b.width, b.height) - pixels(a.width, a.height)
     })
   }, [matches, format, minRes, ratio, minSimilarity, sort])
 
-  const filtersActive =
-    minRes !== 0 || format !== 'any' || ratio !== 'any' || minSimilarity !== 0
+  const filtersActive = minRes !== 0 || format !== 'any' || ratio !== 'any' || minSimilarity !== 0
 
   function resetFilters() {
     setMinRes(0)
@@ -101,7 +127,8 @@ export function ResultsScreen({
   }
 
   const hasError = failure !== null
-  const state = hasError && matches.length === 0 ? 'error' : matches.length === 0 ? 'empty' : 'results'
+  const state =
+    hasError && matches.length === 0 ? 'error' : matches.length === 0 ? 'empty' : 'results'
 
   return (
     <section className="results container">
@@ -109,15 +136,15 @@ export function ResultsScreen({
         <div>
           <button type="button" className="btn btn-ghost" onClick={onRestart}>
             <ArrowLeft size={15} />
-            New search
+            {t('results.newSearch')}
           </button>
-          <h1 className="results-title">Search results</h1>
+          <h1 className="results-title">{t('results.title')}</h1>
           <p className="results-sub">
             {state === 'empty'
-              ? 'No matches found'
+              ? t('results.subtitleEmpty')
               : state === 'error'
-                ? 'Search interrupted'
-                : `${matches.length} possible matches · ${SORT_LABELS[sort]}`}
+                ? t('results.subtitleError')
+                : tc('results.possibleMatches', matches.length, { sort: t(SORT_LABELS[sort]) })}
           </p>
         </div>
         <div className="results-toolbar">
@@ -126,11 +153,11 @@ export function ResultsScreen({
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as SortKey)}
-              aria-label="Sort results"
+              aria-label={t('results.sortAria')}
             >
-              <option value="resolution">Highest resolution</option>
-              {hasSimilarity && <option value="similarity">Highest similarity</option>}
-              <option value="size">Lightest file</option>
+              <option value="resolution">{t('results.sortResolution')}</option>
+              {hasSimilarity && <option value="similarity">{t('results.sortSimilarity')}</option>}
+              <option value="size">{t('results.sortSize')}</option>
             </select>
           </label>
         </div>
@@ -141,27 +168,27 @@ export function ResultsScreen({
           <span className="state-icon" aria-hidden="true">
             <CircleAlert size={22} />
           </span>
-          <h3>Something went wrong</h3>
-          <p>{failure?.message}</p>
+          <h3>{t('results.errorTitle')}</h3>
+          <p>{errorMessage(failure?.code ?? 'unknown_error')}</p>
           {failure?.reference && (
-            <p className="banner-ref">Código de referência: {failure.reference}</p>
+            <p className="banner-ref">{t('common.reference', { reference: failure.reference })}</p>
           )}
           <div className="state-actions">
             <button type="button" className="btn btn-primary" onClick={onRetry}>
               <RotateCcw size={15} />
-              Try again
+              {t('results.tryAgain')}
             </button>
             <button type="button" className="btn btn-ghost" onClick={onRestart}>
-              Use another image
+              {t('results.useAnotherImage')}
             </button>
           </div>
         </div>
       ) : (
         <div className="results-grid">
           <aside className="card original-panel">
-            <span className="eyebrow">Your original</span>
+            <span className="eyebrow">{t('results.yourOriginal')}</span>
             <div className="original-img">
-              <Thumb src={image.src} alt="Your uploaded image" />
+              <Thumb src={image.src} alt={t('results.originalAlt')} />
             </div>
             <div>
               <div className="original-name" title={image.name}>
@@ -169,29 +196,29 @@ export function ResultsScreen({
               </div>
               <dl className="spec-list">
                 <div className="spec-row">
-                  <dt>Dimensions</dt>
+                  <dt>{t('results.specDimensions')}</dt>
                   <dd>
                     {image.width} × {image.height}
                   </dd>
                 </div>
                 <div className="spec-row">
-                  <dt>Pixel count</dt>
-                  <dd>{pixels(image.width, image.height).toLocaleString('en-US')}</dd>
+                  <dt>{t('results.specPixelCount')}</dt>
+                  <dd>{formatNumber(pixels(image.width, image.height))}</dd>
                 </div>
                 <div className="spec-row">
-                  <dt>Quality</dt>
+                  <dt>{t('results.specQuality')}</dt>
                   <dd>{resolutionLabel(image.width, image.height)}</dd>
                 </div>
                 <div className="spec-row">
-                  <dt>Format</dt>
+                  <dt>{t('results.specFormat')}</dt>
                   <dd>{image.format}</dd>
                 </div>
                 <div className="spec-row">
-                  <dt>Ratio</dt>
+                  <dt>{t('results.specRatio')}</dt>
                   <dd>{aspectRatio(image.width, image.height)}</dd>
                 </div>
                 <div className="spec-row">
-                  <dt>File size</dt>
+                  <dt>{t('results.specFileSize')}</dt>
                   <dd>{formatBytes(image.bytes)}</dd>
                 </div>
               </dl>
@@ -203,15 +230,17 @@ export function ResultsScreen({
               <div className="banner is-error" role="alert">
                 <CircleAlert size={16} style={{ flex: 'none', marginTop: 2 }} />
                 <div>
-                  <strong>Latest search failed</strong>
-                  <p>{failure?.message}</p>
+                  <strong>{t('results.latestSearchFailed')}</strong>
+                  <p>{errorMessage(failure?.code ?? 'unknown_error')}</p>
                   {failure?.reference && (
-                    <p className="banner-ref">Código de referência: {failure.reference}</p>
+                    <p className="banner-ref">
+                      {t('common.reference', { reference: failure.reference })}
+                    </p>
                   )}
                   <div className="state-actions">
                     <button type="button" className="btn btn-primary" onClick={onRetry}>
                       <RotateCcw size={15} />
-                      Try again
+                      {t('results.tryAgain')}
                     </button>
                   </div>
                 </div>
@@ -222,10 +251,11 @@ export function ResultsScreen({
               <div className="banner" role="status">
                 <TriangleAlert size={16} style={{ flex: 'none', marginTop: 2 }} />
                 <div>
-                  <strong>Partial results</strong>
-                  {warnings.map((warning) => (
-                    <p key={warning}>{warning}</p>
-                  ))}
+                  <strong>{t('results.partialResults')}</strong>
+                  {warnings.map((warning) => {
+                    const message = warningMessage(warning)
+                    return message ? <p key={warning.code}>{message}</p> : null
+                  })}
                 </div>
               </div>
             )}
@@ -233,17 +263,17 @@ export function ResultsScreen({
             <div className="filters">
               <span className="filter" aria-hidden="true">
                 <SlidersHorizontal size={14} />
-                Filters
+                {t('results.filters')}
               </span>
               <label className="filter">
                 <select
                   value={minRes}
                   onChange={(e) => setMinRes(Number(e.target.value))}
-                  aria-label="Minimum resolution"
+                  aria-label={t('results.minResolutionAria')}
                 >
                   {MIN_RES_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {option.label}
+                      {optionLabel(option, t)}
                     </option>
                   ))}
                 </select>
@@ -252,26 +282,31 @@ export function ResultsScreen({
                 <select
                   value={format}
                   onChange={(e) => setFormat(e.target.value)}
-                  aria-label="Format"
+                  aria-label={t('results.formatAria')}
                 >
-                  <option value="any">Any format</option>
-                  <option value="JPG">JPG</option>
-                  <option value="PNG">PNG</option>
-                  <option value="WEBP">WEBP</option>
+                  {FORMAT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {optionLabel(option, t)}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="filter">
-                <select value={ratio} onChange={(e) => setRatio(e.target.value)} aria-label="Ratio">
+                <select
+                  value={ratio}
+                  onChange={(e) => setRatio(e.target.value)}
+                  aria-label={t('results.ratioAria')}
+                >
                   {RATIO_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {option.label}
+                      {optionLabel(option, t)}
                     </option>
                   ))}
                 </select>
               </label>
               {hasSimilarity && (
                 <label className="filter filter-slider">
-                  Visual match
+                  {t('results.visualMatch')}
                   <input
                     type="range"
                     min={0}
@@ -279,13 +314,13 @@ export function ResultsScreen({
                     step={5}
                     value={minSimilarity}
                     onChange={(e) => setMinSimilarity(Number(e.target.value))}
-                    aria-label="Minimum visual match"
+                    aria-label={t('results.minVisualMatchAria')}
                   />
                   <span className="filter-value">{minSimilarity}%</span>
                 </label>
               )}
               <span className="results-count">
-                {visible.length} of {matches.length}
+                {t('results.countOf', { visible: visible.length, total: matches.length })}
               </span>
             </div>
 
@@ -294,15 +329,12 @@ export function ResultsScreen({
                 <span className="state-icon" aria-hidden="true">
                   <SearchX size={22} />
                 </span>
-                <h3>No matches found</h3>
-                <p>
-                  We could not find another copy of this image. It may be very recent, cropped or
-                  never published. Try a less cropped version.
-                </p>
+                <h3>{t('results.emptyTitle')}</h3>
+                <p>{t('results.emptyBody')}</p>
                 <div className="state-actions">
                   <button type="button" className="btn btn-primary" onClick={onRestart}>
                     <ScanSearch size={15} />
-                    Try another image
+                    {t('results.tryAnotherImage')}
                   </button>
                 </div>
               </div>
@@ -311,15 +343,12 @@ export function ResultsScreen({
                 <span className="state-icon" aria-hidden="true">
                   <SlidersHorizontal size={22} />
                 </span>
-                <h3>No matches meet your filters</h3>
-                <p>
-                  {matches.length} matches were found, but none of them match the current filter
-                  combination.
-                </p>
+                <h3>{t('results.noFilterMatchTitle')}</h3>
+                <p>{tc('results.foundMatches', matches.length)}</p>
                 <div className="state-actions">
                   <button type="button" className="btn" onClick={resetFilters}>
                     <RotateCcw size={15} />
-                    Clear filters
+                    {t('results.clearFilters')}
                   </button>
                 </div>
               </div>
@@ -338,16 +367,12 @@ export function ResultsScreen({
             )}
 
             {filtersActive && state !== 'empty' && visible.length > 0 && (
-              <p className="disclaimer">
-                The largest image is not always the original or the best quality — check the source
-                before downloading.
-              </p>
+              <p className="disclaimer">{t('results.largestDisclaimer')}</p>
             )}
             {state !== 'empty' && matches.length > 0 && (
               <p className="disclaimer">
-                {providerName ? `Results provided by ${providerName}. ` : ''}
-                Dimensions marked as verified were read directly from the source image; others come
-                from the search index and may differ.
+                {providerName ? `${t('results.resultsProvidedBy', { provider: providerName })} ` : ''}
+                {t('results.verifiedNote')}
               </p>
             )}
           </div>

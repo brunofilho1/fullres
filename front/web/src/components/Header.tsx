@@ -1,4 +1,6 @@
 import { Expand } from 'lucide-react'
+import { LanguageSwitcher } from './LanguageSwitcher'
+import { useI18n } from '../lib/i18n'
 
 interface HeaderProps {
   onHome: () => void
@@ -13,6 +15,8 @@ function GithubMark() {
 }
 
 export function Header({ onHome }: HeaderProps) {
+  const { t } = useI18n()
+
   return (
     <header className="header">
       <div className="container header-inner">
@@ -23,7 +27,7 @@ export function Header({ onHome }: HeaderProps) {
           <span className="brand-name">fullres</span>
         </button>
         <div className="header-actions">
-          <span className="pill pill-accent">Open source</span>
+          <LanguageSwitcher />
           <a
             className="btn btn-ghost"
             href="https://github.com/brunofilho1/fullres"
@@ -31,7 +35,7 @@ export function Header({ onHome }: HeaderProps) {
             rel="noreferrer"
           >
             <GithubMark />
-            <span>GitHub</span>
+            <span>{t('header.github')}</span>
           </a>
         </div>
       </div>

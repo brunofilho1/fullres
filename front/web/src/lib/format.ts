@@ -10,8 +10,11 @@ export function pixels(width: number | null, height: number | null): number {
   return width * height
 }
 
-export function resolutionLabel(width: number | null, height: number | null): string {
-  if (width === null || height === null) return 'Unknown'
+export type ResolutionTier = '4K UHD' | 'QHD' | 'FHD' | 'HD' | 'SD'
+
+/** Technical tier token for a resolution, or null when the dimensions are unknown. */
+export function resolutionTier(width: number | null, height: number | null): ResolutionTier | null {
+  if (width === null || height === null) return null
   const h = Math.max(width, height)
   const w = Math.min(width, height)
   if (w >= 3800 && h >= 2100) return '4K UHD'
@@ -21,11 +24,17 @@ export function resolutionLabel(width: number | null, height: number | null): st
   return 'SD'
 }
 
-export function pixelGain(original: number, found: number): string {
+export type PixelGainInfo =
+  | { kind: 'more'; ratio: number }
+  | { kind: 'fewer'; ratio: number }
+  | { kind: 'same'; ratio: number }
+
+/** How many more (or fewer) pixels `found` has than `original`, in a form ready for formatting. */
+export function pixelGainInfo(original: number, found: number): PixelGainInfo {
   const ratio = found / original
-  if (ratio >= 1.05) return `${ratio.toFixed(1)}× more pixels`
-  if (ratio <= 0.95) return `${(1 / ratio).toFixed(1)}× fewer pixels`
-  return 'Same pixel count'
+  if (ratio >= 1.05) return { kind: 'more', ratio }
+  if (ratio <= 0.95) return { kind: 'fewer', ratio: 1 / ratio }
+  return { kind: 'same', ratio: 1 }
 }
 
 export function aspectRatio(width: number | null, height: number | null): string {

@@ -9,9 +9,17 @@ import {
 } from 'lucide-react'
 import type { ImageMeta } from '../lib/types'
 import { formatBytes } from '../lib/format'
+import { useI18n } from '../lib/i18n'
+import type { MessageKey } from '../lib/i18n/messages/en'
 
 const MAX_BYTES = 20 * 1024 * 1024
 const ALLOWED = ['image/jpeg', 'image/png', 'image/webp']
+
+const HOW_STEPS: { n: string; title: MessageKey; desc: MessageKey }[] = [
+  { n: '01', title: 'upload.howStep1Title', desc: 'upload.howStep1Desc' },
+  { n: '02', title: 'upload.howStep2Title', desc: 'upload.howStep2Desc' },
+  { n: '03', title: 'upload.howStep3Title', desc: 'upload.howStep3Desc' },
+]
 
 function extOf(nameOrUrl: string): string {
   const clean = nameOrUrl.split(/[?#]/)[0]
@@ -57,29 +65,33 @@ interface UploadScreenProps {
 }
 
 export function UploadScreen({ onSubmit }: UploadScreenProps) {
+  const { t } = useI18n()
   const inputRef = useRef<HTMLInputElement>(null)
   const [staged, setStaged] = useState<ImageMeta | null>(null)
   const [url, setUrl] = useState('')
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const acceptFile = useCallback(async (file: File) => {
-    setError(null)
-    if (!isAllowedType(file.type, file.name)) {
-      setError('Unsupported format. Use a JPG, PNG or WEBP file.')
-      return
-    }
-    if (file.size > MAX_BYTES) {
-      setError('That file is larger than 20 MB. Try a smaller copy.')
-      return
-    }
-    try {
-      const meta = await loadMeta(file)
-      setStaged(meta)
-    } catch {
-      setError('Could not read that image. It may be corrupted.')
-    }
-  }, [])
+  const acceptFile = useCallback(
+    async (file: File) => {
+      setError(null)
+      if (!isAllowedType(file.type, file.name)) {
+        setError(t('upload.errorFormat'))
+        return
+      }
+      if (file.size > MAX_BYTES) {
+        setError(t('upload.errorTooLarge'))
+        return
+      }
+      try {
+        const meta = await loadMeta(file)
+        setStaged(meta)
+      } catch {
+        setError(t('upload.errorCorrupt'))
+      }
+    },
+    [t],
+  )
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
@@ -102,29 +114,29 @@ export function UploadScreen({ onSubmit }: UploadScreenProps) {
     try {
       parsed = new URL(value)
     } catch {
-      setError('That does not look like a valid image URL.')
+      setError(t('upload.errorInvalidUrl'))
       return
     }
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      setError('Only http and https image URLs are supported.')
+      setError(t('upload.errorProtocol'))
       return
     }
 
     try {
       const response = await fetch(parsed.toString(), { mode: 'cors' })
       if (!response.ok) {
-        setError(`The host returned HTTP ${response.status} for that image URL.`)
+        setError(t('upload.errorHostStatus', { status: response.status }))
         return
       }
       const blob = await response.blob()
       if (blob.size > MAX_BYTES) {
-        setError('That image is larger than 20 MB. Try a smaller copy.')
+        setError(t('upload.errorImageTooLarge'))
         return
       }
       const name = decodeURIComponent(parsed.pathname.split('/').pop() || 'remote-image')
       const type = blob.type && ALLOWED.includes(blob.type) ? blob.type : ''
       if (!isAllowedType(type, name)) {
-        setError('That URL does not point to a JPG, PNG or WEBP image.')
+        setError(t('upload.errorNotImage'))
         return
       }
       const file = new File([blob], name, { type: type || `image/${extensionFor(type)}` })
@@ -132,27 +144,22 @@ export function UploadScreen({ onSubmit }: UploadScreenProps) {
       setStaged(meta)
       setUrl('')
     } catch {
-      setError(
-        'The browser could not download that image. The host may block direct access — download the file and upload it instead.',
-      )
+      setError(t('upload.errorDownload'))
     }
   }
 
   return (
     <>
       <section className="hero container container-narrow">
-        <span className="eyebrow">Your image, at its best</span>
-        <h1>Find the highest-resolution version.</h1>
-        <p className="hero-sub">
-          Upload an image. Find larger versions, original sources and better quality across the
-          web.
-        </p>
+        <span className="eyebrow">{t('upload.eyebrow')}</span>
+        <h1>{t('upload.title')}</h1>
+        <p className="hero-sub">{t('upload.subtitle')}</p>
 
         <div className="dropzone-wrap">
           {staged ? (
             <div className="card preview">
               <div className="preview-thumb">
-                <img src={staged.src} alt="Selected upload preview" />
+                <img src={staged.src} alt={t('upload.previewAlt')} />
               </div>
               <div>
                 <div className="preview-title">{staged.name}</div>
@@ -173,7 +180,7 @@ export function UploadScreen({ onSubmit }: UploadScreenProps) {
                     onClick={() => onSubmit(staged)}
                   >
                     <ScanSearch size={16} />
-                    Search for higher resolutions
+                    {t('upload.searchButton')}
                   </button>
                   <button
                     type="button"
@@ -184,7 +191,7 @@ export function UploadScreen({ onSubmit }: UploadScreenProps) {
                       if (inputRef.current) inputRef.current.value = ''
                     }}
                   >
-                    Change image
+                    {t('upload.changeImage')}
                   </button>
                 </div>
               </div>
@@ -194,7 +201,7 @@ export function UploadScreen({ onSubmit }: UploadScreenProps) {
               className={`dropzone${dragging ? ' is-over' : ''}`}
               role="button"
               tabIndex={0}
-              aria-label="Drop an image here or browse files"
+              aria-label={t('upload.dropzoneAria')}
               onClick={() => inputRef.current?.click()}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -223,21 +230,21 @@ export function UploadScreen({ onSubmit }: UploadScreenProps) {
                   if (file) void acceptFile(file)
                 }}
                 tabIndex={-1}
-                aria-label="Choose an image"
+                aria-label={t('upload.chooseImage')}
               />
               <span className="dropzone-icon" aria-hidden="true">
                 {dragging ? <FileImage size={20} /> : <Upload size={20} />}
               </span>
-              <span className="dropzone-title">Drop your image here</span>
-              <span className="dropzone-sub">or browse files from your device</span>
-              <span className="dropzone-hint">JPG · PNG · WEBP · Up to 20 MB</span>
+              <span className="dropzone-title">{t('upload.dropTitle')}</span>
+              <span className="dropzone-sub">{t('upload.dropSub')}</span>
+              <span className="dropzone-hint">{t('upload.dropHint')}</span>
             </div>
           )}
         </div>
 
         {!staged && (
           <>
-            <div className="divider">or</div>
+            <div className="divider">{t('upload.or')}</div>
             <form
               className="url-row"
               onSubmit={(e) => {
@@ -251,19 +258,19 @@ export function UploadScreen({ onSubmit }: UploadScreenProps) {
                   className="input"
                   style={{ paddingLeft: 34 }}
                   type="url"
-                  placeholder="Or paste an image URL..."
+                  placeholder={t('upload.urlPlaceholder')}
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  aria-label="Image URL"
+                  aria-label={t('upload.imageUrl')}
                 />
               </span>
               <button type="submit" className="btn">
-                Use URL
+                {t('upload.useUrl')}
               </button>
             </form>
             <p className="trust-note">
               <ClipboardPaste size={14} />
-              You can also paste an image from your clipboard
+              {t('upload.pasteNote')}
             </p>
           </>
         )}
@@ -275,29 +282,24 @@ export function UploadScreen({ onSubmit }: UploadScreenProps) {
           </div>
         )}
 
-        <p className="trust-note">No account required · Simple and transparent</p>
+        <p className="trust-note">{t('upload.trustNote')}</p>
       </section>
 
       <section className="how container" id="how">
         <div className="how-head">
-          <span className="eyebrow">How it works</span>
+          <span className="eyebrow">{t('upload.howEyebrow')}</span>
         </div>
         <div className="how-grid">
-          {[
-            { n: '01', t: 'Upload', d: 'Choose any image.' },
-            { n: '02', t: 'Search', d: 'Find matching versions.' },
-            { n: '03', t: 'Recover', d: 'Get the best version.' },
-          ].map((step) => (
+          {HOW_STEPS.map((step) => (
             <div className="how-item" key={step.n}>
               <div className="how-num">{step.n}</div>
-              <h3>{step.t}</h3>
-              <p>{step.d}</p>
+              <h3>{t(step.title)}</h3>
+              <p>{t(step.desc)}</p>
             </div>
           ))}
         </div>
         <p className="disclaimer" id="providers">
-          Searches run through public reverse-image search indexes. Only the image you submit is
-          sent to the search provider.
+          {t('upload.howDisclaimer')}
         </p>
       </section>
     </>

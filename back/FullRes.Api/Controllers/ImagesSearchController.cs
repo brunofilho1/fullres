@@ -103,12 +103,11 @@ public sealed class ImagesSearchController : ControllerBase
         var filters = new SearchFilters(sortBy, minWidth, minHeight, format, minSimilarity);
         var processed = _processor.Process(deduped, filters, removedDuplicates);
 
-        var warnings = new List<string>(processed.Warnings);
+        var warnings = new List<SearchWarning>(processed.Warnings);
         if (probeSummary.Attempted > 0 && probeSummary.Verified < probeSummary.Attempted)
         {
             var failed = probeSummary.Attempted - probeSummary.Verified;
-            warnings.Add(
-                $"{failed} match{(failed == 1 ? "" : "es")} could not be verified against the source image (host unreachable or blocked); listed dimensions come from the search index.");
+            warnings.Add(new SearchWarning { Code = "unverified_matches", Count = failed });
         }
 
         return Ok(new ImageSearchResponse

@@ -170,8 +170,8 @@ public class ImagesSearchEndpointTests
         Assert.Equal("example.com", results[1].GetProperty("domain").GetString());
         Assert.True(results[1].GetProperty("dimensionsVerified").GetBoolean() == false);
 
-        var warnings = root.GetProperty("provider").GetProperty("warnings").EnumerateArray().Select(w => w.GetString()).ToList();
-        Assert.Contains(warnings, w => w!.Contains("duplicate"));
+        var warnings = root.GetProperty("provider").GetProperty("warnings").EnumerateArray().ToList();
+        Assert.Contains(warnings, w => w.GetProperty("code").GetString() == "duplicates_removed");
     }
 
     [Fact]

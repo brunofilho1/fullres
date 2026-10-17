@@ -1,10 +1,10 @@
 import { describeFailure } from './errors'
 import { searchImages, toMatch } from './api'
-import type { ImageMeta, Match, SearchFailure } from './types'
+import type { ImageMeta, Match, SearchFailure, SearchWarning } from './types'
 
 export interface SearchPayload {
   matches: Match[]
-  warnings: string[]
+  warnings: SearchWarning[]
   providerName: string | null
 }
 

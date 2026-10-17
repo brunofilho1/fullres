@@ -7,17 +7,18 @@ import { HowItWorksPage } from './components/HowItWorksPage'
 import { ProvidersPage } from './components/ProvidersPage'
 import { SearchController } from './lib/searchController'
 import { navigate, routeHref, useRoute } from './lib/router'
+import { useI18n } from './lib/i18n'
 
 function Footer() {
+  const { t } = useI18n()
+
   return (
     <footer className="footer">
       <div className="container footer-inner">
         <div className="footer-left">
-          <span className="footer-tagline">
-            FullRes — find the original, get the best resolution. Open source image search.
-          </span>
+          <span className="footer-tagline">{t('footer.tagline')}</span>
           <div className="footer-partners">
-            <span className="footer-partners-label">Powered by</span>
+            <span className="footer-partners-label">{t('footer.poweredBy')}</span>
             <a
               className="footer-logo"
               href="https://www.google.com"
@@ -40,14 +41,14 @@ function Footer() {
         </div>
         <div className="footer-right">
           <nav className="footer-links">
-            <a href={routeHref('how-it-works')}>How it works</a>
-            <a href={routeHref('providers')}>Search providers</a>
+            <a href={routeHref('how-it-works')}>{t('footer.howItWorks')}</a>
+            <a href={routeHref('providers')}>{t('footer.searchProviders')}</a>
             <a href="https://github.com/brunofilho1/fullres" target="_blank" rel="noreferrer">
-              Source code
+              {t('footer.sourceCode')}
             </a>
           </nav>
           <span className="footer-credit">
-            Made by{' '}
+            {t('footer.madeBy')}{' '}
             <a href="https://github.com/brunofilho1" target="_blank" rel="noreferrer">
               Bruno Filho
             </a>

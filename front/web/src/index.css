@@ -279,6 +279,47 @@ p {
   gap: 10px;
 }
 
+/* ---------- language switcher ---------- */
+
+.lang-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted-2);
+  line-height: 1;
+}
+
+.lang-switch:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.lang-select {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 6px;
+  cursor: pointer;
+  outline: none;
+}
+
+.lang-switch:focus-within {
+  border-color: var(--accent-border);
+}
+
+.lang-select option {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
 /* ---------- upload screen ---------- */
 
 .hero {

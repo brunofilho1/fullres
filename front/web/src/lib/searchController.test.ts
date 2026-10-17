@@ -128,7 +128,7 @@ describe('SearchController', () => {
     expect(controller.getSnapshot().status).toBe('idle')
   })
 
-  it('reports a friendly failure and preserves previous results', async () => {
+  it('reports a localised-by-code failure and preserves previous results', async () => {
     searchMock.mockResolvedValueOnce(okResponse)
     const controller = new SearchController()
     await controller.run(image)
@@ -141,7 +141,6 @@ describe('SearchController', () => {
     expect(state.status).toBe('error')
     if (state.status === 'error') {
       expect(state.failure.code).toBe('provider_quota_exceeded')
-      expect(state.failure.message).toContain('limite de utilização')
       expect(state.failure.reference).toBe('trace-1')
       expect(state.matches).toHaveLength(1)
     }

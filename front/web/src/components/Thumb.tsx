@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ImageOff } from 'lucide-react'
+import { useI18n } from '../lib/i18n'
 
 interface ThumbProps {
   src: string
@@ -8,6 +9,7 @@ interface ThumbProps {
 }
 
 export function Thumb({ src, alt, className }: ThumbProps) {
+  const { t } = useI18n()
   const [failed, setFailed] = useState(false)
 
   if (failed) {
@@ -22,7 +24,7 @@ export function Thumb({ src, alt, className }: ThumbProps) {
           color: 'var(--muted)',
         }}
         role="img"
-        aria-label={`${alt} (preview unavailable)`}
+        aria-label={t('thumb.previewUnavailable', { alt })}
       >
         <ImageOff size={22} />
       </span>

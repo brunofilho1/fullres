@@ -39,5 +39,11 @@ public sealed class SearchProviderInfo
 {
     public required string Name { get; init; }
     public required bool Configured { get; init; }
-    public required IReadOnlyList<string> Warnings { get; init; }
+    public required IReadOnlyList<SearchWarning> Warnings { get; init; }
+}
+
+public sealed class SearchWarning
+{
+    public required string Code { get; init; }
+    public int? Count { get; init; }
 }

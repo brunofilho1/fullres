@@ -108,7 +108,7 @@ async function readProblem(response: Response): Promise<ApiProblem | null> {
 export function toMatch(result: ApiResult, index: number): Match {
   return {
     id: `${index}-${result.imageUrl}`,
-    title: result.title?.trim() || result.domain || 'Untitled match',
+    title: result.title?.trim() || result.domain || null,
     url: result.imageUrl,
     pageUrl: result.sourceUrl,
     thumb: result.thumbnailUrl ?? result.imageUrl,
