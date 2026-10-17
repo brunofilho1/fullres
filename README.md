@@ -6,6 +6,12 @@ FullRes is an open-source image search tool: upload an image and compare larger 
 
 > The repository is organized as a monorepo: the web app lives in [`front/web/`](front/web) and the ASP.NET Core API that talks to the reverse image search provider lives in [`back/`](back). To run a real search you need a [SerpApi](https://serpapi.com) API key — see [`back/README.md`](back/README.md).
 
+## Screenshots
+
+![FullRes — upload screen](https://github.com/user-attachments/assets/0592fad0-214d-422d-a10e-1a724e6cd6c1)
+
+![FullRes — results screen](https://github.com/user-attachments/assets/03492d78-64d5-4853-9975-a452359aa965)
+
 ## Screens
 
 ### 1. Upload
